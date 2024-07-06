@@ -37,18 +37,15 @@ install(
 )
 
 if(WIN32)
-    install(
-        FILES "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:$<TARGET_PDB_FILE:uni.gui>>"
-        DESTINATION "bin"
-    )
+    if(BUILD_SHARED_LIBS)
+        install(
+            FILES "$<TARGET_RUNTIME_DLLS:uni.gui>"
+            DESTINATION "bin"
+        )
 
-    install(
-        FILES "$<TARGET_RUNTIME_DLLS:uni.gui>"
-        DESTINATION "bin"
-    )
-
-    add_custom_command(TARGET uni.gui POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:uni.gui> $<TARGET_FILE_DIR:uni.gui>
-        COMMAND_EXPAND_LISTS
-    )
+        add_custom_command(TARGET uni.gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:uni.gui> $<TARGET_FILE_DIR:uni.gui>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
 endif()
