@@ -12,11 +12,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 # remove garbage CDash build targets
 set_property(GLOBAL PROPERTY CTEST_TARGETS_ADDED 1)
 
-# C++ version
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-
 
 #
 # Project
@@ -26,6 +21,16 @@ project(uni.gui
   LANGUAGES CXX
   VERSION 0.0.1
 )
+
+
+
+#
+# Settings
+#
+
+# C++ version
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
 
