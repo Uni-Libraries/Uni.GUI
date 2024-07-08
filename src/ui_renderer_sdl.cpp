@@ -22,7 +22,7 @@
 namespace Uni::GUI {
     bool UiRendererSdl::Init(void* window_handle) {
         m_ptr_window = window_handle;
-        m_ptr_render = SDL_CreateRenderer(static_cast<SDL_Window *>(m_ptr_window), "vulkan");
+        m_ptr_render = SDL_CreateRenderer(static_cast<SDL_Window *>(m_ptr_window), nullptr);
         return m_ptr_render != nullptr;
     }
 
