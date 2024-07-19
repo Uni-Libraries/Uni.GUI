@@ -4,7 +4,8 @@
 
 # set CMake minimum version
 # v3.20: cxx_std_23
-cmake_minimum_required(VERSION 3.20)
+# v3.21: PROJECT_IS_TOP_LEVEL
+cmake_minimum_required(VERSION 3.21)
 
 # module path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
@@ -59,4 +60,7 @@ include(cmake/cpm-imgui-node-editor.cmake)
 #
 
 add_subdirectory(src)
-add_subdirectory(src_gui)
+
+if(PROJECT_IS_TOP_LEVEL)
+    add_subdirectory(src_gui)
+endif()

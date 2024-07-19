@@ -33,10 +33,12 @@ install(
 )
 
 if(WIN32)
-  install(
-    FILES "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:$<TARGET_PDB_FILE:uni.gui.example>>"
-    DESTINATION "bin"
-  )
+  if(MSVC)
+    install(
+      FILES "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:$<TARGET_PDB_FILE:uni.gui.example>>"
+      DESTINATION "bin"
+    )
+  endif()
 
   install(
     FILES "$<TARGET_RUNTIME_DLLS:uni.gui.example>"
