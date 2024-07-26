@@ -1,7 +1,6 @@
 CPMAddPackage(
   NAME imgui-notify
   GITHUB_REPOSITORY patrickcjk/imgui-notify
-  GIT_SHALLOW 1
   GIT_TAG eb35d8d9505c6f59a54e9fdb402952e2e4faf1ee
   DOWNLOAD_ONLY True
 )

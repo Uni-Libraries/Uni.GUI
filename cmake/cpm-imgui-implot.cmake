@@ -1,7 +1,6 @@
 CPMAddPackage(
   NAME imgui-implot
   GITHUB_REPOSITORY epezent/implot
-  GIT_SHALLOW 1
   GIT_TAG f156599faefe316f7dd20fe6c783bf87c8bb6fd9
   DOWNLOAD_ONLY True
 )

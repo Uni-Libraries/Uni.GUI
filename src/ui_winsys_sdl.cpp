@@ -19,7 +19,7 @@
 
 namespace Uni::GUI{
     bool UiWinsysSdl::Init(const std::string& title) {
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMEPAD) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
             return false;
         }
 
