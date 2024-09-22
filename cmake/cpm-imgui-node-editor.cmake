@@ -1,6 +1,7 @@
 CPMAddPackage(
   NAME imgui-node-editor
   GITHUB_REPOSITORY thedmd/imgui-node-editor
+  VERSION 20231227
   GIT_TAG e78e447900909a051817a760efe13fe83e6e1afc
   DOWNLOAD_ONLY True
 )

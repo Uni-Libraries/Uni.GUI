@@ -1,7 +1,8 @@
 CPMAddPackage(
   NAME imgui-filebrowser
   GITHUB_REPOSITORY AirGuanZ/imgui-filebrowser
-  GIT_TAG 17a87fedfa997fb2b504a6b3088cc44e64fcac6a
+  VERSION 20240901
+  GIT_TAG b8fedfb673a4e13413bcac789d4c0b63bc19d948
   DOWNLOAD_ONLY True
 )
 

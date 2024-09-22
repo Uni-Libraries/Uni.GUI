@@ -1,7 +1,8 @@
 CPMAddPackage(
   NAME imgui-imspinner
   GITHUB_REPOSITORY dalerank/imspinner
-  GIT_TAG ff2eb8c3230debc878db689c9113498a7de97804
+  VERSION 20240807
+  GIT_TAG fde83465c0efaca55cf60716f217599bbf929707
   DOWNLOAD_ONLY True
 )
 
