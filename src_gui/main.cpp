@@ -16,7 +16,7 @@ std::string uni_gui_app_version_get()
     return "1.0.0";
 }
 
-std::vector<std::shared_ptr<Uni::GUI::UiElement>> uni_gui_app_initialize()
+std::vector<std::shared_ptr<Uni::GUI::UiElement>> uni_gui_app_initialize( int argc, char **argv)
 {
     return {std::make_shared<Uni::GUI::Example::WindowDemo>()};
 }

@@ -45,7 +45,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
     state->ui.SetVsync(1);
 
     // register windows
-    state->elements = uni_gui_app_initialize();
+    state->elements = uni_gui_app_initialize(argc, argv);
     if (state->elements.empty())
     {
         return SDL_APP_FAILURE;
