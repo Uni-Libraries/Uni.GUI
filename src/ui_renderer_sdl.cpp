@@ -20,8 +20,7 @@
 
 
 namespace Uni::GUI {
-    bool UiRendererSdl::Init(void* window_handle, bool use_vsync) {
-        SDL_SetHint(SDL_HINT_RENDER_VSYNC, use_vsync ? "1" : "0");
+    bool UiRendererSdl::Init(void* window_handle) {
         m_ptr_window = window_handle;
         m_ptr_render = SDL_CreateRenderer(static_cast<SDL_Window *>(m_ptr_window), nullptr);
         return m_ptr_render != nullptr;
@@ -43,5 +42,15 @@ namespace Uni::GUI {
         SDL_RenderClear(static_cast<SDL_Renderer *>(m_ptr_render));
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), static_cast<SDL_Renderer *>(m_ptr_render));
         SDL_RenderPresent(static_cast<SDL_Renderer *>(m_ptr_render));
+    }
+
+    bool UiRendererSdl::SetVsync(int interval)
+    {
+        if (!m_ptr_render)
+        {
+            return false;
+        }
+
+        return SDL_SetRenderVSync(static_cast<SDL_Renderer *>(m_ptr_render), interval);
     }
 }

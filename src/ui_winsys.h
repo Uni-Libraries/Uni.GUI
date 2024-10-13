@@ -26,7 +26,7 @@ namespace Uni::GUI {
 
         virtual void* GetHandle() = 0;
 
-        virtual bool ProcessEvent() = 0;
+        virtual bool ProcessEvent(void* event) = 0;
 
         virtual void NewFrame() = 0;
 

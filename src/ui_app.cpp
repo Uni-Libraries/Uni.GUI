@@ -21,7 +21,7 @@
 //
 
 namespace Uni::GUI {
-    bool Ui::Init(const std::string& title, bool vsync) {
+    bool Ui::Init(const std::string& title) {
         m_winsys = std::make_shared<UiWinsysSdl>();
         m_renderer = std::make_shared<UiRendererSdl>();
 
@@ -29,7 +29,7 @@ namespace Uni::GUI {
             return false;
         }
 
-        if(!m_renderer->Init(m_winsys->GetHandle(), vsync)){
+        if(!m_renderer->Init(m_winsys->GetHandle())){
             return false;
         }
 
@@ -69,11 +69,6 @@ namespace Uni::GUI {
     }
 
     bool Ui::Process() {
-
-        if (!m_winsys->ProcessEvent()) {
-            return false;
-        }
-
         // Start the Dear ImGui frame
         m_renderer->NewFrame(m_winsys->ResizeRequired());
         m_winsys->NewFrame();
@@ -91,11 +86,25 @@ namespace Uni::GUI {
         return true;
     }
 
+    bool Ui::ProcessEvent(void* event)
+    {
+        return m_winsys->ProcessEvent(event);
+    }
+
     bool Ui::RegisterWindow(UiElement *ui_element) {
         if(!ui_element) {
             return false;
         }
         m_windows.push_back(ui_element);
         return true;
+    }
+
+    bool Ui::SetVsync(int interval)
+    {
+        if (!m_renderer)
+        {
+            return false;
+        }
+        return m_renderer->SetVsync(interval);
     }
 }

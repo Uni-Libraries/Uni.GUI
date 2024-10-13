@@ -23,7 +23,7 @@ namespace Uni::GUI {
 
         void* GetHandle() override;
 
-        bool ProcessEvent() override;
+        bool ProcessEvent(void* event) override;
 
         void NewFrame() override;
 

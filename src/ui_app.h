@@ -22,9 +22,11 @@ namespace Uni::GUI {
     class Ui{
 
     public:
-        bool Init(const std::string& title, bool use_vsync);
+        bool Init(const std::string& title);
         bool Process();
+        bool ProcessEvent(void* event);
         bool RegisterWindow(UiElement* ui_element);
+        bool SetVsync(int interval);
 
     private:
         std::shared_ptr<UiWinsys> m_winsys{};
