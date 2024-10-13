@@ -21,7 +21,7 @@
 //
 
 namespace Uni::GUI {
-    bool Ui::Init(const std::string& title) {
+    bool Ui::Init(const std::string& title, bool vsync) {
         m_winsys = std::make_shared<UiWinsysSdl>();
         m_renderer = std::make_shared<UiRendererSdl>();
 
@@ -29,7 +29,7 @@ namespace Uni::GUI {
             return false;
         }
 
-        if(!m_renderer->Init(m_winsys->GetHandle())){
+        if(!m_renderer->Init(m_winsys->GetHandle(), vsync)){
             return false;
         }
 

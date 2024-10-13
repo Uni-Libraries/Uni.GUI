@@ -17,7 +17,7 @@
 namespace Uni::GUI{
     class UiRendererSdl: public UiRenderer{
     public:
-        bool Init(void* window_handle) override;
+        bool Init(void* window_handle, bool use_vsync) override;
         bool InitImgui() override;
         void NewFrame(std::pair<size_t, size_t> new_size) override;
         void Render() override;

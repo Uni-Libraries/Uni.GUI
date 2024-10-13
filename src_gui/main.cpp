@@ -30,7 +30,7 @@ int main()
 
     // initialize UI
     Uni::GUI::Ui ui{};
-    if (!ui.Init(std::format("Uni.GUI demo v{}.{}.{}", 0, 0, 0))) {
+    if (!ui.Init(std::format("Uni.GUI demo v{}.{}.{}", 0, 0, 0), true)) {
         std::printf("main() -> failed to initialize UI");
         return 1;
     }

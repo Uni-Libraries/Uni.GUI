@@ -22,7 +22,7 @@ namespace Uni::GUI {
     class Ui{
 
     public:
-        bool Init(const std::string& title);
+        bool Init(const std::string& title, bool use_vsync);
         bool Process();
         bool RegisterWindow(UiElement* ui_element);
 

@@ -20,7 +20,8 @@
 
 
 namespace Uni::GUI {
-    bool UiRendererSdl::Init(void* window_handle) {
+    bool UiRendererSdl::Init(void* window_handle, bool use_vsync) {
+        SDL_SetHint(SDL_HINT_RENDER_VSYNC, use_vsync ? "1" : "0");
         m_ptr_window = window_handle;
         m_ptr_render = SDL_CreateRenderer(static_cast<SDL_Window *>(m_ptr_window), nullptr);
         return m_ptr_render != nullptr;
