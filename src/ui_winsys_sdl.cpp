@@ -19,6 +19,10 @@
 
 namespace Uni::GUI{
     bool UiWinsysSdl::Init(const std::string& title) {
+#if defined(SDL_PLATFORM_LINUX)
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
+#endif
+
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             return false;
         }
