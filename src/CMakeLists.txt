@@ -19,11 +19,9 @@ target_include_directories(uni.gui PUBLIC .)
 
 # dependencies
 target_link_libraries(uni.gui PUBLIC imgui)
-target_link_libraries(uni.gui PUBLIC imgui-filebrowser)
 target_link_libraries(uni.gui PUBLIC imgui-implot)
 target_link_libraries(uni.gui PUBLIC imgui-imspinner)
 target_link_libraries(uni.gui PUBLIC imgui-notify)
-#target_link_libraries(uni.gui PUBLIC imgui-node-editor)
 
 
 #

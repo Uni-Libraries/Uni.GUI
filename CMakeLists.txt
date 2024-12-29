@@ -47,11 +47,9 @@ include(cmake/cpm-sdl3.cmake)
 
 # ImGUI
 include(cmake/cpm-imgui.cmake)
-include(cmake/cpm-imgui-filebrowser.cmake)
 include(cmake/cpm-imgui-implot.cmake)
 include(cmake/cpm-imgui-imspinner.cmake)
 include(cmake/cpm-imgui-notify.cmake)
-#include(cmake/cpm-imgui-node-editor.cmake)
 
 
 
