@@ -1,13 +1,13 @@
 CPMAddPackage(
   NAME imgui
   GITHUB_REPOSITORY ocornut/imgui
-  VERSION 1.91.8
-  GIT_TAG v1.91.8
+  VERSION 1.91.9b
+  GIT_TAG v1.91.9b
   DOWNLOAD_ONLY True
 )
 
 if(imgui_ADDED)
-  add_library(imgui STATIC)
+  add_library(imgui)
 
   # common
   target_sources(imgui PRIVATE
