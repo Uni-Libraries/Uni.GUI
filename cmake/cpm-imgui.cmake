@@ -33,4 +33,6 @@ if(imgui_ADDED)
   target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}/misc/cpp/")
 
   target_link_libraries(imgui PUBLIC SDL3-static)
+
+  set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()

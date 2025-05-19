@@ -16,5 +16,6 @@ if(imgui-implot_ADDED)
 
   target_include_directories(imgui-implot PUBLIC "${imgui-implot_SOURCE_DIR}")
   target_link_libraries(imgui-implot PUBLIC imgui)
+  set_target_properties(imgui-implot PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 

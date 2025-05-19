@@ -23,6 +23,7 @@ target_link_libraries(uni.gui PUBLIC imgui-implot)
 target_link_libraries(uni.gui PUBLIC imgui-imspinner)
 target_link_libraries(uni.gui PUBLIC imgui-notify)
 
+set_target_properties(uni.gui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 #
 # Installation
