@@ -46,7 +46,7 @@ if(WIN32)
   )
 
   add_custom_command(TARGET uni.gui.example POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:uni.gui.example> $<TARGET_FILE_DIR:uni.gui.example>
+    COMMAND ${CMAKE_COMMAND} -E copy -t "$<TARGET_FILE_DIR:uni.gui.example>" "$<TARGET_RUNTIME_DLLS:uni.gui.example>"
     COMMAND_EXPAND_LISTS
   )
 endif()

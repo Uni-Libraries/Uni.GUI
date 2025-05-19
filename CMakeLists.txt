@@ -5,7 +5,8 @@
 # set CMake minimum version
 # v3.20: cxx_std_23
 # v3.21: PROJECT_IS_TOP_LEVEL
-cmake_minimum_required(VERSION 3.21)
+# v3.26: -E copy -t
+cmake_minimum_required(VERSION 3.26)
 
 # module path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
