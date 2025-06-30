@@ -35,12 +35,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Shared libs
-if(WIN32)
-  set(BUILD_SHARED_LIBS OFF)
-else()
-  option(BUILD_SHARED_LIBS "Build shared libs" OFF)
-endif()
-
+option(BUILD_SHARED_LIBS "Build shared libs" OFF)
 
 
 #

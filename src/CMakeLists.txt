@@ -37,15 +37,15 @@ install(
 )
 
 if(WIN32)
-    if(BUILD_SHARED_LIBS)
-        install(
-            FILES "$<TARGET_RUNTIME_DLLS:uni.gui>"
-            DESTINATION "bin"
-        )
-
-        add_custom_command(TARGET uni.gui POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:uni.gui> $<TARGET_FILE_DIR:uni.gui>
-            COMMAND_EXPAND_LISTS
-        )
-    endif()
+    #if(BUILD_SHARED_LIBS)
+    #    install(
+    #        FILES "$<TARGET_RUNTIME_DLLS:uni.gui>"
+    #        DESTINATION "bin"
+    #    )
+    #
+    #    add_custom_command(TARGET uni.gui POST_BUILD
+    #        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:uni.gui> $<TARGET_FILE_DIR:uni.gui>
+    #        COMMAND_EXPAND_LISTS
+    #    )
+    #endif()
 endif()

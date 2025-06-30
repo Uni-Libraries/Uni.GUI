@@ -32,7 +32,16 @@ if(imgui_ADDED)
   target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}/backends/")
   target_include_directories(imgui PUBLIC "${imgui_SOURCE_DIR}/misc/cpp/")
 
-  target_link_libraries(imgui PUBLIC SDL3-static)
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    target_compile_definitions(imgui PRIVATE "-DIMGUI_API=__declspec(dllexport)")
+    target_compile_definitions(imgui INTERFACE  "-DIMGUI_API=__declspec(dllimport)")
+  endif()
+
+  if(BUILD_SHARED_LIBS)
+    target_link_libraries(imgui PUBLIC SDL3::SDL3-shared)
+  else()
+    target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
+  endif()
 
   set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
