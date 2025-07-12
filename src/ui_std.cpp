@@ -58,7 +58,7 @@ namespace ImGui {
     }
 
     void TextUnformatted(const std::string &text) {
-        return ImGui::TextUnformatted(text.c_str());
+        ImGui::TextUnformatted(text.c_str());
     }
 
     bool TreeNode(const std::string &label) {

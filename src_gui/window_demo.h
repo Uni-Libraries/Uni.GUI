@@ -1,4 +1,4 @@
-#pragma
+#pragma once
 
 //
 // Includes
@@ -18,3 +18,4 @@ namespace Uni::GUI::Example {
         bool UiUpdate() override;
     };
 }
+

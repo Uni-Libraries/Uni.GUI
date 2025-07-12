@@ -35,3 +35,4 @@ namespace Uni::GUI {
         virtual std::pair<size_t,size_t> ResizeRequired() = 0;
     };
 }
+
