@@ -49,7 +49,10 @@ include(cmake/cpm.cmake)
 if(WIN32)
     include(cmake/cpm-sdl3.cmake)
 else()
-    find_package(SDL3 REQUIRED)
+    find_package(SDL3 QUIET)
+    if(NOT SDL3_FOUND)
+        include(cmake/cpm-sdl3.cmake)
+    endif()
 endif()
 
 # ImGUI
