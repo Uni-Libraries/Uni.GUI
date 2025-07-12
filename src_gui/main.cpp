@@ -20,3 +20,4 @@ std::vector<std::shared_ptr<Uni::GUI::UiElement>> uni_gui_app_initialize( int ar
 {
     return {std::make_shared<Uni::GUI::Example::WindowDemo>()};
 }
+

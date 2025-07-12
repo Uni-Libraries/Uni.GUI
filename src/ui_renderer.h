@@ -27,3 +27,4 @@ namespace Uni::GUI {
         virtual bool SetVsync(int interval) = 0;
     };
 }
+
