@@ -40,11 +40,7 @@ if(imgui_ADDED)
   endif()
 
   
-  if(BUILD_SHARED_LIBS OR NOT WIN32)
-    target_link_libraries(imgui PUBLIC SDL3::SDL3-shared)
-  else()
-    target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
-  endif()
+  target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
   set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()

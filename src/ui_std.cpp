@@ -37,7 +37,7 @@ namespace ImGui {
     }
 
     bool Checkbox(const std::string &label, bool *v) {
-        return Checkbox(label.c_str(), v);
+        return ImGui::Checkbox(label.c_str(), v);
     }
 
     bool CollapsingHeader(const std::string &label, ImGuiTreeNodeFlags flags) {

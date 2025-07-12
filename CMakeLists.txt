@@ -46,11 +46,13 @@ option(BUILD_SHARED_LIBS "Build shared libs" OFF)
 include(cmake/cpm.cmake)
 
 # SDL3
-if(NOT WIN32)
-    find_package(SDL3)
-endif()
-if(NOT SDL3_FOUND)
+if(WIN32)
     include(cmake/cpm-sdl3.cmake)
+else()
+    find_package(SDL3 QUIET)
+    if(NOT SDL3_FOUND)
+        include(cmake/cpm-sdl3.cmake)
+    endif()
 endif()
 
 # ImGUI
