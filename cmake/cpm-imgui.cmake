@@ -1,8 +1,8 @@
 CPMAddPackage(
   NAME imgui
   GITHUB_REPOSITORY ocornut/imgui
-  VERSION 2025.06.21-docking
-  GIT_TAG efe2b21a5fa0199c9bb7e26184a7f7df6ed07942
+  VERSION 2025.10.03-docking
+  GIT_TAG 8f3f4282288b17aee798b6fade6787a8a17843ca
   DOWNLOAD_ONLY True
 )
 
