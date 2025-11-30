@@ -31,6 +31,7 @@
 *.out
 *.app
 
+.cache/
 .idea/
 cmake-build-*/
 build/
