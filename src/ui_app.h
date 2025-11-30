@@ -14,12 +14,16 @@
 #include "ui_renderer.h"
 #include "ui_winsys.h"
 
+#include "uni.gui_export.h"
+
+
+
 //
 //
 //
 
 namespace Uni::GUI {
-    class Ui{
+    class UNI_GUI_EXPORT Ui{
 
     public:
         bool Init(const std::string& title);

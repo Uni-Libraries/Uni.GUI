@@ -8,9 +8,12 @@ target_sources(uni.gui PRIVATE
     "ui_app.cpp"
     "ui_font.cpp"
     "ui_std.cpp"
-    "ui_main.cpp"
     "ui_winsys_sdl.cpp"
     "ui_renderer_sdl.cpp"
+)
+
+target_sources(uni.gui INTERFACE
+    "ui_main.cpp"
 )
 
 # includes
@@ -20,6 +23,11 @@ target_include_directories(uni.gui PUBLIC .)
 target_link_libraries(uni.gui PUBLIC imgui)
 target_link_libraries(uni.gui PUBLIC implot)
 set_target_properties(uni.gui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+include(GenerateExportHeader)
+generate_export_header(uni.gui)
+target_include_directories(uni.gui PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+
 
 #
 # Installation
