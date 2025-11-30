@@ -2,14 +2,13 @@
 # Application
 #
 
-add_library(uni.gui STATIC)
+add_library(uni.gui)
 
 target_sources(uni.gui PRIVATE
     "ui_app.cpp"
     "ui_font.cpp"
     "ui_std.cpp"
     "ui_main.cpp"
-
     "ui_winsys_sdl.cpp"
     "ui_renderer_sdl.cpp"
 )
@@ -19,10 +18,7 @@ target_include_directories(uni.gui PUBLIC .)
 
 # dependencies
 target_link_libraries(uni.gui PUBLIC imgui)
-target_link_libraries(uni.gui PUBLIC imgui-implot)
-target_link_libraries(uni.gui PUBLIC imgui-imspinner)
-target_link_libraries(uni.gui PUBLIC imgui-notify)
-
+target_link_libraries(uni.gui PUBLIC implot)
 set_target_properties(uni.gui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 #

@@ -11,8 +11,6 @@ cmake_minimum_required(VERSION 3.26)
 # module path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/")
 
-# remove garbage CDash build targets
-set_property(GLOBAL PROPERTY CTEST_TARGETS_ADDED 1)
 
 
 #
@@ -21,7 +19,6 @@ set_property(GLOBAL PROPERTY CTEST_TARGETS_ADDED 1)
 
 project(uni.gui
   LANGUAGES CXX
-  VERSION 0.0.1
 )
 
 
@@ -35,31 +32,17 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Shared libs
-option(BUILD_SHARED_LIBS "Build shared libs" OFF)
+option(BUILD_SHARED_LIBS "Build shared libs" ON)
+
 
 
 #
 # Dependencies
 #
 
-# PM
-include(cmake/cpm.cmake)
-
-# SDL3
-if(WIN32)
-    include(cmake/cpm-sdl3.cmake)
-else()
-    find_package(SDL3 QUIET)
-    if(NOT SDL3_FOUND)
-        include(cmake/cpm-sdl3.cmake)
-    endif()
-endif()
-
-# ImGUI
-include(cmake/cpm-imgui.cmake)
-include(cmake/cpm-imgui-implot.cmake)
-include(cmake/cpm-imgui-imspinner.cmake)
-include(cmake/cpm-imgui-notify.cmake)
+include(3rdparty/sdl.cmake)
+include(3rdparty/imgui.cmake)
+include(3rdparty/implot.cmake)
 
 
 
@@ -68,7 +51,6 @@ include(cmake/cpm-imgui-notify.cmake)
 #
 
 add_subdirectory(src)
-
 if(PROJECT_IS_TOP_LEVEL)
-    add_subdirectory(src_gui)
+    add_subdirectory(src_demo)
 endif()

@@ -5,8 +5,6 @@
 // Imgui
 #include <imgui.h>
 
-#include "fa_solid_900.h"
-
 // Uni.GUI
 #include "ui_app.h"
 #include "ui_font.h"
@@ -42,16 +40,12 @@ namespace Uni::GUI {
         // Set io confugation
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
 
         // Configure fonts
         io.Fonts->AddFontFromMemoryCompressedBase85TTF(Font::GetRobotoMedium(), 12 * 2.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
-        static const ImWchar icons_ranges[] = { 0xf000, 0xf950, 0 };
-
-        ImFontConfig icons_config{};
-        icons_config.MergeMode = true;
-        icons_config.PixelSnapH = true;
-        icons_config.FontDataOwnedByAtlas = false;
-        io.Fonts->AddFontFromMemoryTTF((void*)fa_solid_900, sizeof(fa_solid_900), 12 * 2.0f, &icons_config, icons_ranges);
 
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();

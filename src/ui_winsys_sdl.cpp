@@ -23,13 +23,14 @@ namespace Uni::GUI{
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
 #endif
 
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             return false;
         }
 
         // Create window with SDL_Renderer graphics context
-        uint32_t window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
-        m_sdl_window = SDL_CreateWindow(title.c_str(), 1280, 720, window_flags);
+        float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+        uint32_t window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        m_sdl_window = SDL_CreateWindow(title.c_str(), 1280 * main_scale, 720 * main_scale, window_flags);
         if (!m_sdl_window) {
             return false;
         }
