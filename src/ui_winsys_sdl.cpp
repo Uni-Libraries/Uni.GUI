@@ -29,7 +29,7 @@ namespace Uni::GUI{
 
         // Create window with SDL_Renderer graphics context
         float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-        uint32_t window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+        uint32_t window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN ;
         m_sdl_window = SDL_CreateWindow(title.c_str(), 1280 * main_scale, 720 * main_scale, window_flags);
         if (!m_sdl_window) {
             return false;
