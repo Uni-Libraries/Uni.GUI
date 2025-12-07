@@ -17,7 +17,7 @@ target_sources(uni.gui.demo PRIVATE
 target_include_directories(uni.gui.demo PRIVATE .)
 
 # dependencies
-target_link_libraries(uni.gui.demo PRIVATE uni.gui)
+target_link_libraries(uni.gui.demo PRIVATE uni.gui.main)
 
 
 
