@@ -12,6 +12,7 @@
 
 // Uni.GUI
 #include "ui_renderer_sdlgpu.h"
+#include "SDL3/SDL_gpu.h"
 
 namespace Uni::GUI {
 
@@ -184,6 +185,10 @@ namespace Uni::GUI {
         }
 
         return true;
+    }
+
+    const std::string_view UiRendererSdlGpu::GetApiName() const {
+        return SDL_GetGPUDeviceDriver(m_gpu_device);
     }
 
 } // namespace Uni::GUI

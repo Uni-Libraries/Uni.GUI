@@ -31,7 +31,7 @@ namespace Uni::GUI {
         bool ProcessEvent(void* event);
         bool RegisterWindow(UiElement* ui_element);
         bool SetVsync(int interval);
-
+        const std::string_view GetRenderingApiName() const;
     private:
         std::unique_ptr<UiWinsys> m_winsys{};
         std::unique_ptr<UiRenderer> m_renderer{};

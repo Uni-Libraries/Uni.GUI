@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <string_view>
 #include <utility>
 
 
@@ -25,6 +26,7 @@ namespace Uni::GUI {
         virtual void NewFrame(std::pair<size_t, size_t> new_size) = 0;
         virtual void Render() = 0;
         virtual bool SetVsync(int interval) = 0;
+        [[nodiscard]] virtual const std::string_view GetApiName() const { return "unknown"; }
     };
 }
 

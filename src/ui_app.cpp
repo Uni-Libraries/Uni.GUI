@@ -31,16 +31,16 @@ namespace Uni::GUI {
 
         // Prefer SDL_GPU renderer if available, fall back to SDL_Renderer
         {
-            auto renderer_gpu = std::make_unique<UiRendererSdlGpu>();
+           /* auto renderer_gpu = std::make_unique<UiRendererSdlGpu>();
             if (renderer_gpu->Init(m_winsys->GetHandle())) {
                 m_renderer = std::move(renderer_gpu);
-            } else {
+            } else {*/
                 auto renderer_sdl = std::make_unique<UiRendererSdl>();
                 if (!renderer_sdl->Init(m_winsys->GetHandle())) {
                     return false;
                 }
                 m_renderer = std::move(renderer_sdl);
-            }
+           // }
         }
 
         m_winsys->Show();
@@ -115,5 +115,9 @@ namespace Uni::GUI {
             return false;
         }
         return m_renderer->SetVsync(interval);
+    }
+
+    const std::string_view UiApp::GetRenderingApiName() const{
+        return m_renderer->GetApiName();
     }
 }
