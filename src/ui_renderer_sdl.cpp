@@ -51,6 +51,7 @@ namespace Uni::GUI {
             return false;
         }
 
-        return SDL_SetRenderVSync(static_cast<SDL_Renderer *>(m_ptr_render), interval);
+        // SDL_SetRenderVSync returns 0 on success, negative on error.
+        return SDL_SetRenderVSync(static_cast<SDL_Renderer *>(m_ptr_render), interval) == 0;
     }
 }

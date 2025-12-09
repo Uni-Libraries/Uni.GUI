@@ -2,7 +2,7 @@
 // Includes
 //
 
-// Imgui
+ // Imgui
 #include <imgui.h>
 
 // Uni.GUI
@@ -11,6 +11,7 @@
 
 #include "ui_winsys_sdl.h"
 #include "ui_renderer_sdl.h"
+#include "ui_renderer_sdlgpu.h"
 
 
 
@@ -21,14 +22,24 @@
 namespace Uni::GUI {
     bool Ui::Init(const std::string& title) {
         m_winsys = std::make_shared<UiWinsysSdl>();
-        m_renderer = std::make_shared<UiRendererSdl>();
 
-        if(!m_winsys->Init(title)){
+        // Initialize windowing / SDL first
+        if (!m_winsys->Init(title)) {
             return false;
         }
 
-        if(!m_renderer->Init(m_winsys->GetHandle())){
-            return false;
+        // Prefer SDL_GPU renderer if available, fall back to SDL_Renderer
+        {
+            auto renderer_gpu = std::make_shared<UiRendererSdlGpu>();
+            if (renderer_gpu->Init(m_winsys->GetHandle())) {
+                m_renderer = renderer_gpu;
+            } else {
+                auto renderer_sdl = std::make_shared<UiRendererSdl>();
+                if (!renderer_sdl->Init(m_winsys->GetHandle())) {
+                    return false;
+                }
+                m_renderer = renderer_sdl;
+            }
         }
 
         m_winsys->Show();
@@ -37,24 +48,27 @@ namespace Uni::GUI {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
 
-        // Set io confugation
+        // Set io configuration
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-
         // Configure fonts
-        io.Fonts->AddFontFromMemoryCompressedBase85TTF(Font::GetRobotoMedium(), 12 * 2.0f, nullptr, io.Fonts->GetGlyphRangesCyrillic());
+        io.Fonts->AddFontFromMemoryCompressedBase85TTF(
+            Font::GetRobotoMedium(),
+            12 * 2.0f,
+            nullptr,
+            io.Fonts->GetGlyphRangesCyrillic());
 
         // Setup Dear ImGui style
         ImGui::StyleColorsDark();
 
         // Setup Platform/Renderer backends
-        if(!m_winsys->InitImgui()){
+        if (!m_winsys->InitImgui()) {
             return false;
         }
-        if(!m_renderer->InitImgui()) {
+        if (!m_renderer->InitImgui()) {
             return false;
         }
         m_winsys->Show();
