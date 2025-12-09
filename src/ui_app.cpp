@@ -4,6 +4,7 @@
 
  // Imgui
 #include <imgui.h>
+#include <memory>
 
 // Uni.GUI
 #include "ui_app.h"
@@ -20,8 +21,8 @@
 //
 
 namespace Uni::GUI {
-    bool Ui::Init(const std::string& title) {
-        m_winsys = std::make_shared<UiWinsysSdl>();
+    bool UiApp::Init(const std::string& title) {
+        m_winsys = std::make_unique<UiWinsysSdl>();
 
         // Initialize windowing / SDL first
         if (!m_winsys->Init(title)) {
@@ -30,15 +31,15 @@ namespace Uni::GUI {
 
         // Prefer SDL_GPU renderer if available, fall back to SDL_Renderer
         {
-            auto renderer_gpu = std::make_shared<UiRendererSdlGpu>();
+            auto renderer_gpu = std::make_unique<UiRendererSdlGpu>();
             if (renderer_gpu->Init(m_winsys->GetHandle())) {
-                m_renderer = renderer_gpu;
+                m_renderer = std::move(renderer_gpu);
             } else {
-                auto renderer_sdl = std::make_shared<UiRendererSdl>();
+                auto renderer_sdl = std::make_unique<UiRendererSdl>();
                 if (!renderer_sdl->Init(m_winsys->GetHandle())) {
                     return false;
                 }
-                m_renderer = renderer_sdl;
+                m_renderer = std::move(renderer_sdl);
             }
         }
 
@@ -76,7 +77,7 @@ namespace Uni::GUI {
         return true;
     }
 
-    bool Ui::Process() {
+    bool UiApp::Process() {
         // Start the Dear ImGui frame
         m_renderer->NewFrame(m_winsys->ResizeRequired());
         m_winsys->NewFrame();
@@ -84,7 +85,7 @@ namespace Uni::GUI {
 
         // windows
         for (auto *window: m_windows) {
-            window->UiUpdate();
+            window->UiUpdate(*this);
         }
 
         // Rendering
@@ -94,12 +95,12 @@ namespace Uni::GUI {
         return true;
     }
 
-    bool Ui::ProcessEvent(void* event)
+    bool UiApp::ProcessEvent(void* event)
     {
         return m_winsys->ProcessEvent(event);
     }
 
-    bool Ui::RegisterWindow(UiElement *ui_element) {
+    bool UiApp::RegisterWindow(UiElement *ui_element) {
         if(!ui_element) {
             return false;
         }
@@ -107,7 +108,7 @@ namespace Uni::GUI {
         return true;
     }
 
-    bool Ui::SetVsync(int interval)
+    bool UiApp::SetVsync(int interval)
     {
         if (!m_renderer)
         {

@@ -23,7 +23,7 @@
 //
 
 namespace Uni::GUI {
-    class UNI_GUI_EXPORT Ui{
+    class UNI_GUI_EXPORT UiApp{
 
     public:
         bool Init(const std::string& title);
@@ -33,8 +33,8 @@ namespace Uni::GUI {
         bool SetVsync(int interval);
 
     private:
-        std::shared_ptr<UiWinsys> m_winsys{};
-        std::shared_ptr<UiRenderer> m_renderer{};
+        std::unique_ptr<UiWinsys> m_winsys{};
+        std::unique_ptr<UiRenderer> m_renderer{};
         std::vector<UiElement*> m_windows{};
     };
 }

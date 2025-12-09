@@ -15,7 +15,7 @@
 //
 
 namespace Uni::GUI::Example {
-    bool WindowDemo::UiUpdate() {
+    bool WindowDemo::UiUpdate(UiApp&) {
         static bool win_about = false;
         static bool win_demo = false;
         static bool win_demo_implot = false;
