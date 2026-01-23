@@ -14,7 +14,6 @@ add_library(uni.gui)
 target_sources(uni.gui PRIVATE
     "ui_app.cpp"
     "ui_font.cpp"
-    "ui_std.cpp"
     "ui_winsys_sdl.cpp"
     "ui_renderer_sdl.cpp"
     "ui_renderer_sdlgpu.cpp"
