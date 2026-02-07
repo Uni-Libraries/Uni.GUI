@@ -4,6 +4,11 @@
 // Includes
 //
 
+// stdlib
+#include <memory>
+#include <optional>
+
+
 
 //
 // Interface
@@ -17,6 +22,6 @@ namespace Uni::GUI {
     public:
         virtual ~UiElement() = default;
 
-        virtual bool UiUpdate(UiApp&) = 0;
+        virtual bool UiUpdate(std::optional<std::shared_ptr<UiApp>>) = 0;
     };
 }

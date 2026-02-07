@@ -85,7 +85,7 @@ namespace Uni::GUI {
 
         // windows
         for (auto *window: m_windows) {
-            window->UiUpdate(*this);
+            window->UiUpdate(std::shared_ptr<UiApp>(this));
         }
 
         // Rendering
