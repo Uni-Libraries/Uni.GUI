@@ -36,6 +36,8 @@ namespace Uni::GUI {
         std::unique_ptr<UiWinsys> m_winsys{};
         std::unique_ptr<UiRenderer> m_renderer{};
         std::vector<UiElement*> m_windows{};
+
+        UiState m_state{};
     };
 }
 

@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 
+#include "ui_state.h"
 
 
 //
@@ -22,6 +23,6 @@ namespace Uni::GUI {
     public:
         virtual ~UiElement() = default;
 
-        virtual bool UiUpdate(std::optional<std::shared_ptr<UiApp>>) = 0;
+        virtual bool UiUpdate(UiState& state) = 0;
     };
 }

@@ -23,6 +23,7 @@
 namespace Uni::GUI {
     bool UiApp::Init(const std::string& title) {
         m_winsys = std::make_unique<UiWinsysSdl>();
+        m_state.app = this;
 
         // Initialize windowing / SDL first
         if (!m_winsys->Init(title)) {
@@ -85,7 +86,7 @@ namespace Uni::GUI {
 
         // windows
         for (auto *window: m_windows) {
-            window->UiUpdate(std::shared_ptr<UiApp>(this));
+            window->UiUpdate(m_state);
         }
 
         // Rendering

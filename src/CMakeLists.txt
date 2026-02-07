@@ -10,7 +10,8 @@ include(GenerateExportHeader)
 # Application
 #
 
-add_library(uni.gui)
+add_library(uni.gui
+        ui_state.h)
 target_sources(uni.gui PRIVATE
     "ui_app.cpp"
     "ui_font.cpp"
