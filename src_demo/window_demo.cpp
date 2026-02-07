@@ -8,14 +8,14 @@
 
 // Uni.GUI
 #include "window_demo.h"
-
+#include "ui_app.h"
 
 //
 // Implementation
 //
 
 namespace Uni::GUI::Example {
-    bool WindowDemo::UiUpdate() {
+    bool WindowDemo::UiUpdate(UiApp& app) {
         static bool win_about = false;
         static bool win_demo = false;
         static bool win_demo_implot = false;
@@ -24,6 +24,8 @@ namespace Uni::GUI::Example {
         ImGui::SetNextWindowSize({800,600});
         if (ImGui::Begin("demo"))
         {
+            ImGui::Text(std::string(app.GetRenderingApiName()).c_str());
+
             if (ImGui::Button("About"))
             {
                 win_about = true;
@@ -54,7 +56,8 @@ namespace Uni::GUI::Example {
             ImGui::ShowDemoWindow(&win_demo);
         }
 
-        if(win_demo_implot){
+        if(win_demo_implot)
+        {
             ImPlot::ShowDemoWindow(&win_demo_implot);
         }
 

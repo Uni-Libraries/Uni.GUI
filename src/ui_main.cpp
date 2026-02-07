@@ -18,7 +18,7 @@
 
 struct AppState
 {
-    Uni::GUI::Ui ui{};
+    Uni::GUI::UiApp ui{};
     std::vector<std::shared_ptr<Uni::GUI::UiElement>> elements;
 };
 
