@@ -41,7 +41,6 @@ target_sources(uni.gui.main INTERFACE
         "ui_main.cpp"
 )
 target_link_libraries(uni.gui.main INTERFACE uni.gui)
-generate_export_header(uni.gui.main)
 target_include_directories(uni.gui.main INTERFACE ${CMAKE_CURRENT_BINARY_DIR})
 
 
