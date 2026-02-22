@@ -40,7 +40,7 @@ option(BUILD_SHARED_LIBS "Build shared libs" ON)
 # Dependencies
 #
 
-include(3rdparty/sdl.cmake)
+find_package(SDL3 REQUIRED)
 include(3rdparty/imgui.cmake)
 include(3rdparty/implot.cmake)
 
