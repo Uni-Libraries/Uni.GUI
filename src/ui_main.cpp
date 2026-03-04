@@ -86,6 +86,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result)
 {
+    uni_gui_app_finalize();
     if (appstate)
     {
         delete static_cast<AppState*>(appstate);

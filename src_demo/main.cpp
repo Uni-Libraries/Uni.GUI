@@ -1,10 +1,21 @@
 //
-// INcud
+// Include
 //
-#include <window_demo.h>
 
+// stdlib
+#include <memory>
+
+// uni.gui
 #include "ui_callbacks.h"
 
+// uni.gui.demo
+#include "window_demo.h"
+
+
+
+//
+// Functions
+//
 
 std::string uni_gui_app_name_get()
 {
@@ -21,3 +32,6 @@ std::vector<std::shared_ptr<Uni::GUI::UiElement>> uni_gui_app_initialize( int ar
     return {std::make_shared<Uni::GUI::Example::WindowDemo>()};
 }
 
+void uni_gui_app_finalize() {
+
+}
