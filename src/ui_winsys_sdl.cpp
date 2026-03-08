@@ -18,6 +18,19 @@
 //
 
 namespace Uni::GUI{
+    UiWinsysSdl::~UiWinsysSdl() {
+        if (ImGui::GetCurrentContext() != nullptr) {
+            ImGui_ImplSDL3_Shutdown();
+        }
+
+        if (m_sdl_window != nullptr) {
+            SDL_DestroyWindow(static_cast<SDL_Window*>(m_sdl_window));
+            m_sdl_window = nullptr;
+        }
+
+        SDL_Quit();
+    }
+
     bool UiWinsysSdl::Init(const std::string& title) {
 #if defined(SDL_PLATFORM_LINUX)
         SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");

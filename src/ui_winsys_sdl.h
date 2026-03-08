@@ -15,6 +15,7 @@
 namespace Uni::GUI {
     class UiWinsysSdl: public UiWinsys{
     public:
+        ~UiWinsysSdl() override;
         bool Init(const std::string& title) override;
 
         bool InitImgui() override;

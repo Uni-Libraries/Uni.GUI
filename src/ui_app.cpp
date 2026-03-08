@@ -9,6 +9,8 @@
 // Uni.GUI
 #include "ui_app.h"
 #include "ui_font.h"
+#include "ui_texture.h"
+#include "ui_texture_registry.h"
 
 #include "ui_winsys_sdl.h"
 #include "ui_renderer_sdl.h"
@@ -21,6 +23,17 @@
 //
 
 namespace Uni::GUI {
+    UiApp::~UiApp() {
+        Detail::UiTextureSetActiveRegistry(nullptr);
+        m_renderer.reset();
+        m_winsys.reset();
+        m_texture_registry.reset();
+
+        if (ImGui::GetCurrentContext() != nullptr) {
+            ImGui::DestroyContext();
+        }
+    }
+
     bool UiApp::Init(const std::string& title) {
         m_winsys = std::make_unique<UiWinsysSdl>();
         m_state.app = this;
@@ -49,6 +62,7 @@ namespace Uni::GUI {
         // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
+        m_texture_registry = std::make_unique<Detail::UiTextureRegistry>();
 
         // Set io configuration
         ImGuiIO& io = ImGui::GetIO();
@@ -79,6 +93,8 @@ namespace Uni::GUI {
     }
 
     bool UiApp::Process() {
+        Detail::UiTextureSetActiveRegistry(m_texture_registry.get());
+
         // Start the Dear ImGui frame
         m_renderer->NewFrame(m_winsys->ResizeRequired());
         m_winsys->NewFrame();
@@ -92,6 +108,10 @@ namespace Uni::GUI {
         // Rendering
         ImGui::Render();
         m_renderer->Render();
+        if (m_texture_registry) {
+            m_texture_registry->CollectGarbage();
+        }
+        Detail::UiTextureSetActiveRegistry(nullptr);
 
         return true;
     }
@@ -116,6 +136,25 @@ namespace Uni::GUI {
             return false;
         }
         return m_renderer->SetVsync(interval);
+    }
+
+    UiTexture UiApp::TextureCreate(const int width, const int height) {
+        if (!m_texture_registry) {
+            return {};
+        }
+        return m_texture_registry->CreateTexture(width, height);
+    }
+
+    bool UiApp::TextureDestroy(const UiTextureHandle handle) {
+        return m_texture_registry && m_texture_registry->Destroy(handle);
+    }
+
+    UiTexture UiApp::TextureGet(const UiTextureHandle handle) const noexcept {
+        return m_texture_registry ? UiTexture{m_texture_registry.get(), handle} : UiTexture{};
+    }
+
+    UiTextureHandle UiApp::TextureGetHandle(const UiTexture& texture) const noexcept {
+        return texture.m_registry == m_texture_registry.get() ? texture.m_handle : UiTextureHandleInvalid;
     }
 
     const std::string_view UiApp::GetRenderingApiName() const{

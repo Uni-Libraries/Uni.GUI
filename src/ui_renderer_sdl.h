@@ -20,6 +20,7 @@ struct SDL_Window;
 namespace Uni::GUI{
     class UiRendererSdl: public UiRenderer{
     public:
+        ~UiRendererSdl() override;
         bool Init(void* window_handle) override;
         bool InitImgui() override;
         void NewFrame(std::pair<size_t, size_t> new_size) override;

@@ -21,6 +21,19 @@
 
 
 namespace Uni::GUI {
+    UiRendererSdl::~UiRendererSdl() {
+        if (ImGui::GetCurrentContext() != nullptr) {
+            ImGui_ImplSDLRenderer3_Shutdown();
+        }
+
+        if (m_renderer != nullptr) {
+            SDL_DestroyRenderer(m_renderer);
+            m_renderer = nullptr;
+        }
+
+        m_window = nullptr;
+    }
+
     bool UiRendererSdl::Init(void* window_handle) {
         m_window = static_cast<SDL_Window*>(window_handle);
         m_renderer = SDL_CreateRenderer(m_window, nullptr);
