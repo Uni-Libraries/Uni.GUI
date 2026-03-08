@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       fail-fast: false
-      
+
       matrix:
         os: [ubuntu-latest, windows-2025]
         build_type: [Release]
@@ -21,21 +21,24 @@ jobs:
           - os: windows-2025
             c_compiler: cl
             cpp_compiler: cl
-          
+            vcpkg_triplet: x64-windows
+
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
-            
+            vcpkg_triplet: x64-linux
+
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
+            vcpkg_triplet: x64-linux
         exclude:
           - os: windows-2025
             c_compiler: gcc
-            
+
           - os: windows-2025
             c_compiler: clang
-          
+
           - os: ubuntu-latest
             c_compiler: cl
 
@@ -50,6 +53,12 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends xorg-dev libglu1-mesa-dev
 
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+
+    - name: Install SDL3 via vcpkg
+      run: vcpkg install sdl3:${{ matrix.vcpkg_triplet }}
+
     - name: Set reusable strings
       id: strings
       shell: bash
@@ -62,6 +71,8 @@ jobs:
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_INSTALLATION_ROOT }}/scripts/buildsystems/vcpkg.cmake
+        -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
         -S ${{ github.workspace }}
 
     - name: Build

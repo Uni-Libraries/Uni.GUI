@@ -15,7 +15,7 @@ namespace Uni::GUI::Example {
     class WindowDemo: public Uni::GUI::UiElement {
     public:
         explicit WindowDemo() = default;
-        bool UiUpdate(UiApp&) override;
+        bool UiUpdate(UiState&) override;
     };
 }
 

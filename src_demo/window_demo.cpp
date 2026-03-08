@@ -15,7 +15,7 @@
 //
 
 namespace Uni::GUI::Example {
-    bool WindowDemo::UiUpdate(UiApp& app) {
+    bool WindowDemo::UiUpdate(UiState& state) {
         static bool win_about = false;
         static bool win_demo = false;
         static bool win_demo_implot = false;
@@ -24,7 +24,7 @@ namespace Uni::GUI::Example {
         ImGui::SetNextWindowSize({800,600});
         if (ImGui::Begin("demo"))
         {
-            ImGui::Text(std::string(app.GetRenderingApiName()).c_str());
+            ImGui::Text("%s", std::string(state.app->GetRenderingApiName()).c_str());
 
             if (ImGui::Button("About"))
             {
