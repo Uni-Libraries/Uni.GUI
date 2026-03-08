@@ -22,19 +22,19 @@ jobs:
             c_compiler: cl
             cpp_compiler: cl
             vcpkg_triplet: x64-windows
-            vcpkg_commit_id: a42af01b72c28a8e1d7b48107b33e4f286a55ef6
+            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
             vcpkg_triplet: x64-linux
-            vcpkg_commit_id: a42af01b72c28a8e1d7b48107b33e4f286a55ef6
+            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
 
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
             vcpkg_triplet: x64-linux
-            vcpkg_commit_id: a42af01b72c28a8e1d7b48107b33e4f286a55ef6
+            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
         exclude:
           - os: windows-2025
             c_compiler: gcc
