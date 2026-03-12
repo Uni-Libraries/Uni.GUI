@@ -1,58 +1,44 @@
 #pragma once
 
-#include <cstdint>
-#include <memory>
-
-#include <imgui.h>
-
+// uni.gui
 #include "uni.gui_export.h"
 
+// forward declaration
+struct ImTextureData;
+struct ImTextureRef;
+
+
+//
+// CLass
+//
 namespace Uni::GUI {
 
-class UiApp;
-
-using UiTextureHandle = std::uint64_t;
-inline constexpr UiTextureHandle UiTextureHandleInvalid = 0;
-
-namespace Detail {
-    class UiTextureRegistry;
-}
-
-class UNI_GUI_EXPORT UiTexture {
+class UNI_GUI_EXPORT UiTexture final{
 public:
-    UiTexture() = default;
-    UiTexture(Detail::UiTextureRegistry* registry, UiTextureHandle handle) noexcept;
+    // Ctor
+    UiTexture(int width, int height) noexcept;
+    ~UiTexture();
+    UiTexture(const UiTexture&) = delete;
+    UiTexture& operator=(const UiTexture&) = delete;
 
-    [[nodiscard]] bool IsValid() const noexcept;
-    [[nodiscard]] UiTextureHandle Handle() const noexcept;
-    void Reset() noexcept;
+    // Accessors
+    [[nodiscard]] ImTextureRef GetRef();
 
-    bool CreateRGBA32(int width, int height);
-    void Destroy();
-
-    void Clear(ImU32 rgba = 0);
-    [[nodiscard]] bool IsCreated() const;
-
+    // Properties
     [[nodiscard]] int Width() const;
     [[nodiscard]] int Height() const;
     [[nodiscard]] int Pitch() const;
 
-    unsigned char* Pixels();
-    unsigned char* PixelsAt(int x, int y);
+    // Data
+    [[nodiscard]] void* Pixels();
+    [[nodiscard]] const void* Pixels() const;
+    [[nodiscard]] void* PixelsAt(int x, int y);
+    [[nodiscard]] const void* PixelsAt(int x, int y) const;
 
-    void MarkFullUpdate();
-    void MarkUpdateRect(int x, int y, int width, int height);
-
-    [[nodiscard]] ImTextureRef GetTexRef() const;
-
+    // Operations
+    void Clear(uint32_t rgba = 0);
 private:
-    [[nodiscard]] Detail::UiTextureRegistry* registry() const noexcept;
-
-private:
-    Detail::UiTextureRegistry* m_registry{};
-    UiTextureHandle m_handle{UiTextureHandleInvalid};
-
-    friend class UiApp;
+    ImTextureData* m_data{nullptr};
 };
 
 } // namespace Uni::GUI

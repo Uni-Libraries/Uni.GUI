@@ -10,13 +10,12 @@ include(GenerateExportHeader)
 # Application
 #
 
-add_library(uni.gui
-        ui_state.h)
+add_library(uni.gui)
+
 target_sources(uni.gui PRIVATE
     "ui_app.cpp"
     "ui_font.cpp"
     "ui_texture.cpp"
-    "ui_texture_registry.cpp"
     "ui_winsys_sdl.cpp"
     "ui_renderer_sdl.cpp"
     "ui_renderer_sdlgpu.cpp"

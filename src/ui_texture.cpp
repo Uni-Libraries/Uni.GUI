@@ -1,101 +1,97 @@
+//
+// Includes
+//
+
+// stdlib
+#include <cstddef>
+#include <cstdint>
+
+// imgui
+#include <imgui.h>
+
+// uni.gui
 #include "ui_texture.h"
 
-#include "ui_texture_registry.h"
+#include "imgui_internal.h"
+
+
+
+//
+// Implementation
+//
 
 namespace Uni::GUI {
 
-UiTexture::UiTexture(Detail::UiTextureRegistry* registry, const UiTextureHandle handle) noexcept
-    : m_registry(registry),
-      m_handle(handle) {
+//
+// Ctor
+//
+
+UiTexture::UiTexture(int width, int height) noexcept {
+    m_data = new ImTextureData;
+    m_data->Create(ImTextureFormat_RGBA32, width, height);
+    ImGui::RegisterUserTexture(m_data);
 }
 
-bool UiTexture::IsValid() const noexcept {
-    auto* reg = registry();
-    return reg != nullptr && reg->IsValid(m_handle);
+UiTexture::~UiTexture() {
+    ImGui::UnregisterUserTexture(m_data);
+    delete m_data;
 }
 
-UiTextureHandle UiTexture::Handle() const noexcept {
-    return m_handle;
+
+//
+// Accessors
+//
+
+ImTextureRef UiTexture::GetRef() {
+    return m_data->GetTexRef();
 }
 
-void UiTexture::Reset() noexcept {
-    m_registry = nullptr;
-    m_handle = UiTextureHandleInvalid;
-}
 
-bool UiTexture::CreateRGBA32(const int width, const int height) {
-    auto* reg = registry();
-    if (reg == nullptr) {
-        return false;
+
+//
+// Properties
+//
+
+int UiTexture::Width() const { return m_data->Width; }
+
+int UiTexture::Height() const { return m_data->Height; }
+
+int UiTexture::Pitch() const { return m_data->GetPitch(); }
+
+
+
+//
+// Data
+//
+
+void* UiTexture::Pixels() { return m_data->GetPixels(); }
+
+const void* UiTexture::Pixels() const { return m_data->GetPixels(); }
+
+void* UiTexture::PixelsAt(const int x, const int y) { return m_data->GetPixelsAt(x, y); }
+
+const void* UiTexture::PixelsAt(int x, int y) const { return m_data->GetPixelsAt(x, y); }
+
+
+
+//
+// Operations
+//
+
+void UiTexture::Clear(const uint32_t rgba) {
+    const std::uint8_t r = static_cast<std::uint8_t>((rgba >> IM_COL32_R_SHIFT) & 0xFFU);
+    const std::uint8_t g = static_cast<std::uint8_t>((rgba >> IM_COL32_G_SHIFT) & 0xFFU);
+    const std::uint8_t b = static_cast<std::uint8_t>((rgba >> IM_COL32_B_SHIFT) & 0xFFU);
+    const std::uint8_t a = static_cast<std::uint8_t>((rgba >> IM_COL32_A_SHIFT) & 0xFFU);
+
+    auto* px = static_cast<uint8_t*>(Pixels());
+    const auto count = static_cast<std::size_t>(Width()) * static_cast<std::size_t>(Height());
+    for (std::size_t i = 0; i < count; ++i) {
+        px[i * 4U + 0U] = r;
+        px[i * 4U + 1U] = g;
+        px[i * 4U + 2U] = b;
+        px[i * 4U + 3U] = a;
     }
-
-    m_registry = reg;
-    return reg->CreateRGBA32(m_handle, width, height);
-}
-
-void UiTexture::Destroy() {
-    auto* reg = registry();
-    if (reg != nullptr) {
-        reg->Destroy(m_handle);
-    }
-    m_handle = UiTextureHandleInvalid;
-}
-
-void UiTexture::Clear(const ImU32 rgba) {
-    if (auto* reg = registry()) {
-        reg->Clear(m_handle, rgba);
-    }
-}
-
-bool UiTexture::IsCreated() const {
-    auto* reg = registry();
-    return reg != nullptr && reg->IsCreated(m_handle);
-}
-
-int UiTexture::Width() const {
-    auto* reg = registry();
-    return reg != nullptr ? reg->Width(m_handle) : 0;
-}
-
-int UiTexture::Height() const {
-    auto* reg = registry();
-    return reg != nullptr ? reg->Height(m_handle) : 0;
-}
-
-int UiTexture::Pitch() const {
-    auto* reg = registry();
-    return reg != nullptr ? reg->Pitch(m_handle) : 0;
-}
-
-unsigned char* UiTexture::Pixels() {
-    auto* reg = registry();
-    return reg != nullptr ? reg->Pixels(m_handle) : nullptr;
-}
-
-unsigned char* UiTexture::PixelsAt(const int x, const int y) {
-    auto* reg = registry();
-    return reg != nullptr ? reg->PixelsAt(m_handle, x, y) : nullptr;
-}
-
-void UiTexture::MarkFullUpdate() {
-    if (auto* reg = registry()) {
-        reg->MarkFullUpdate(m_handle);
-    }
-}
-
-void UiTexture::MarkUpdateRect(int x, int y, int width, int height) {
-    if (auto* reg = registry()) {
-        reg->MarkUpdateRect(m_handle, x, y, width, height);
-    }
-}
-
-ImTextureRef UiTexture::GetTexRef() const {
-    auto* reg = registry();
-    return reg != nullptr ? reg->GetTexRef(m_handle) : ImTextureRef{};
-}
-
-Detail::UiTextureRegistry* UiTexture::registry() const noexcept {
-    return m_registry != nullptr ? m_registry : Detail::UiTextureGetActiveRegistry();
 }
 
 } // namespace Uni::GUI
