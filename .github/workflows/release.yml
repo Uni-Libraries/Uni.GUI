@@ -1,0 +1,448 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_COMMIT_ID: 1600ce2ba1b6b621bfc5a31a785c4963b817a1c7
+  SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
+  SDL_PREFIX: ${{ github.workspace }}/../sdl3
+  ABI_MAJOR: 1
+
+jobs:
+  release-metadata:
+    name: Verify release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - &checkout-release
+        name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+
+      - name: Verify release tag and metadata
+        shell: bash
+        run: >
+          cmake
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -DEXPECTED_TAG="${{ github.ref_name }}"
+          -P "${{ github.workspace }}/cmake/VerifyReleaseVersion.cmake"
+
+  package:
+    name: Package ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    needs: [release-metadata, release-abi]
+    env:
+      SDL_C_COMPILER: gcc
+      SDL_BUILD_TYPE: Release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            cxx_compiler: g++
+            suffix: linux-x64
+            generator: TGZ
+          - name: Windows x64
+            os: windows-2025-vs2026
+            cxx_compiler: cl
+            vcpkg_triplet: x64-windows
+            suffix: windows-x64
+            generator: ZIP
+          - name: macOS x64
+            os: macos-26-intel
+            cxx_compiler: clang++
+            vcpkg_triplet: x64-osx
+            osx_architecture: x86_64
+            suffix: macos-x64
+            generator: TGZ
+          - name: macOS ARM64
+            os: macos-26
+            cxx_compiler: clang++
+            vcpkg_triplet: arm64-osx
+            osx_architecture: arm64
+            suffix: macos-arm64
+            generator: TGZ
+
+    steps:
+      - *checkout-release
+
+      - name: Checkout pinned SDL 3.4.12
+        if: runner.os == 'Linux'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: libsdl-org/SDL
+          ref: ${{ env.SDL_COMMIT_ID }}
+          path: sdl-source
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf autoconf-archive automake libtool libltdl-dev \
+            build-essential git make pkg-config cmake ninja-build \
+            gnome-desktop-testing libasound2-dev libpulse-dev libaudio-dev \
+            libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
+            libdbus-1-dev libibus-1.0-dev \
+            libudev-dev libthai-dev libpipewire-0.3-dev libwayland-dev \
+            libdecor-0-dev liburing-dev libusb-1.0-0-dev
+
+      - name: Build and install pinned SDL 3.4.12
+        if: runner.os == 'Linux'
+        run: |
+          cmake -G Ninja \
+            -S "${{ github.workspace }}/sdl-source" \
+            -B "${{ runner.temp }}/sdl-build" \
+            -DCMAKE_C_COMPILER="${{ env.SDL_C_COMPILER }}" \
+            -DCMAKE_BUILD_TYPE="${{ env.SDL_BUILD_TYPE }}" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.SDL_PREFIX }}" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_INSTALL_DOCS=OFF \
+            -DSDL_UNINSTALL=OFF \
+            -DCMAKE_C_FLAGS="-g3 -fno-omit-frame-pointer"
+          cmake --build "${{ runner.temp }}/sdl-build" --parallel
+          cmake --install "${{ runner.temp }}/sdl-build"
+
+      - name: Setup vcpkg
+        if: runner.os != 'Linux'
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgDirectory: '${{ runner.temp }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT_ID }}'
+
+      - name: Install SDL3 with vcpkg
+        if: runner.os != 'Linux'
+        run: vcpkg install "sdl3[vulkan]:${{ matrix.vcpkg_triplet }}"
+
+      - name: Configure release
+        run: >
+          cmake
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }}
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_architecture }}
+          -DCMAKE_BUILD_TYPE=Release
+          ${{ runner.os != 'Linux' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_ROOT) || '' }}
+          ${{ runner.os != 'Linux' && format('-DVCPKG_TARGET_TRIPLET={0}', matrix.vcpkg_triplet) || '' }}
+          ${{ runner.os == 'Linux' && format('-DCMAKE_PREFIX_PATH={0}', env.SDL_PREFIX) || '' }}
+          -DCMAKE_INSTALL_PREFIX="${{ runner.temp }}/unigui-stage"
+          -DBUILD_SHARED_LIBS=ON
+          -DUNIGUI_BUILD_DEMO=ON
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=OFF
+          -DUNIGUI_INSTALL=ON
+          -DUNIGUI_PACKAGE_PLATFORM_SUFFIX=${{ matrix.suffix }}
+
+      - name: Build release
+        run: cmake --build "${{ github.workspace }}/build" --config Release --parallel
+
+      - name: Run release unit tests
+        if: runner.os != 'Windows'
+        run: |
+          export LD_LIBRARY_PATH="${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64:${LD_LIBRARY_PATH:-}"
+          ctest --test-dir "${{ github.workspace }}/build" --build-config Release --output-on-failure
+
+      - name: Run Windows release unit tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ github.workspace }}\build\src\Release;${{ github.workspace }}\build\Release;${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\bin;$env:PATH"
+          ctest --test-dir "${{ github.workspace }}/build" --build-config Release --output-on-failure
+
+      - name: Install release
+        run: cmake --install "${{ github.workspace }}/build" --config Release
+
+      - name: Validate installed package contents
+        run: >
+          cmake
+          -DINSTALL_PREFIX=${{ runner.temp }}/unigui-stage
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DEXPECT_STATIC=OFF
+          -P "${{ github.workspace }}/cmake/ValidateInstalledPackage.cmake"
+
+      - name: Relocate installed package
+        run: cmake -E rename "${{ runner.temp }}/unigui-stage" "${{ runner.temp }}/unigui-relocated"
+
+      - name: Configure installed consumer
+        run: >
+          cmake
+          -S "${{ github.workspace }}/tests/package"
+          -B "${{ github.workspace }}/release-consumer"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }}
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_architecture }}
+          -DCMAKE_BUILD_TYPE=Release
+          ${{ runner.os == 'Windows' && '-DCMAKE_CONFIGURATION_TYPES=Release' || '' }}
+          ${{ runner.os != 'Linux' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_ROOT) || '' }}
+          ${{ runner.os != 'Linux' && format('-DVCPKG_TARGET_TRIPLET={0}', matrix.vcpkg_triplet) || '' }}
+          -DCMAKE_PREFIX_PATH="${{ runner.temp }}/unigui-relocated${{ runner.os == 'Linux' && format(';{0}', env.SDL_PREFIX) || '' }}"
+          -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
+          -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+
+      - name: Build installed consumer
+        run: cmake --build "${{ github.workspace }}/release-consumer" --config Release --parallel
+
+      - name: Run installed consumer on Unix
+        if: runner.os != 'Windows'
+        run: |
+          export LD_LIBRARY_PATH="${{ runner.temp }}/unigui-relocated/lib:${{ runner.temp }}/unigui-relocated/lib64:${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="${{ runner.temp }}/unigui-relocated/lib:${{ runner.temp }}/unigui-relocated/lib64:${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64:${DYLD_LIBRARY_PATH:-}"
+          ctest --test-dir "${{ github.workspace }}/release-consumer" --build-config Release --output-on-failure
+
+      - name: Run installed consumer on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ runner.temp }}\unigui-relocated\bin;${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\bin;$env:PATH"
+          ctest --test-dir "${{ github.workspace }}/release-consumer" --build-config Release --output-on-failure
+
+      - name: Build binary archive
+        working-directory: ${{ github.workspace }}/build
+        run: cpack --config CPackConfig.cmake -C Release -G ${{ matrix.generator }}
+
+      - name: Validate exact binary archive
+        run: >
+          cmake
+          -DARCHIVE_DIRECTORY=${{ github.workspace }}/build
+          -DARCHIVE_EXTENSION=${{ matrix.generator == 'ZIP' && 'zip' || 'tar.gz' }}
+          -DEXTRACT_DIR=${{ runner.temp }}/unigui-binary-archive
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DREFERENCE_INSTALL_PREFIX=${{ runner.temp }}/unigui-relocated
+          -DEXPECTED_PLATFORM_SUFFIX=${{ matrix.suffix }}
+          -DEXPECT_STATIC=OFF
+          -P "${{ github.workspace }}/cmake/ValidateBinaryPackage.cmake"
+
+      - name: Build source archive
+        if: runner.os == 'Linux'
+        working-directory: ${{ github.workspace }}/build
+        run: cpack --config CPackSourceConfig.cmake -G TGZ
+
+      - name: Smoke test source archive
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          archive=$(ls "${{ github.workspace }}"/build/UniGUI-*-Source.tar.gz)
+          cmake -E tar xzf "$archive"
+          source_root=$(ls -d UniGUI-*-Source)
+          if find "$source_root" -name .git -print -quit | grep -q .; then
+            printf 'Source archive contains Git administrative files\n' >&2
+            exit 1
+          fi
+          cmake -G Ninja \
+            -S "$source_root" \
+            -B unigui-source-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DUNIGUI_BUILD_DEMO=OFF \
+            -DUNIGUI_BUILD_TESTS=OFF \
+            -DUNIGUI_INSTALL=ON
+          cmake --build unigui-source-build --target unigui --parallel
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          path: ${{ runner.temp }}/unigui-relocated
+          format: spdx-json
+          output-file: ${{ github.workspace }}/build/UniGUI-${{ github.ref_name }}-${{ matrix.suffix }}.spdx.json
+          artifact-name: UniGUI-${{ matrix.suffix }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: ${{ github.workspace }}/build/UniGUI-*
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-${{ matrix.suffix }}
+          path: ${{ github.workspace }}/build/UniGUI-*
+          if-no-files-found: error
+          retention-days: 7
+
+  release-abi:
+    name: Capture Linux release ABI baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: release-metadata
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+
+      - name: Checkout pinned SDL 3.4.12
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: libsdl-org/SDL
+          ref: ${{ env.SDL_COMMIT_ID }}
+          path: sdl-source
+          persist-credentials: false
+
+      - name: Install ABI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git make pkg-config cmake ninja-build abigail-tools binutils \
+            gnome-desktop-testing libasound2-dev libpulse-dev libaudio-dev \
+            libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
+            libdbus-1-dev libibus-1.0-dev libudev-dev libthai-dev \
+            libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
+            libusb-1.0-0-dev
+
+      - name: Build and install pinned SDL 3.4.12
+        run: |
+          cmake -G Ninja \
+            -S "${{ github.workspace }}/sdl-source" \
+            -B "${{ runner.temp }}/sdl-build" \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="${{ env.SDL_PREFIX }}" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_INSTALL_DOCS=OFF \
+            -DSDL_UNINSTALL=OFF
+          cmake --build "${{ runner.temp }}/sdl-build" --parallel
+          cmake --install "${{ runner.temp }}/sdl-build"
+
+      - name: Download latest released ABI baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          baseline_tag=$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName \
+            --jq '[.[] | .tagName | select(startswith("v${{ env.ABI_MAJOR }}."))][0] // ""')
+          if [[ -z "$baseline_tag" ]]; then
+            printf 'No released ABI %s baseline exists; this release establishes it.\n' \
+              "${{ env.ABI_MAJOR }}"
+            exit 0
+          fi
+          baseline_dir="${{ github.workspace }}/abi-baseline"
+          mkdir -p "$baseline_dir"
+          gh release download "$baseline_tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.abi' --pattern '*.symbols' --dir "$baseline_dir"
+          for baseline_file in "$baseline_dir"/*; do
+            gh attestation verify "$baseline_file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$baseline_tag" \
+              --deny-self-hosted-runners
+          done
+          printf 'ABI_BASELINE_OPTIONS=-DUNIGUI_ENABLE_ABI_BASELINE_CHECK=ON -DUNIGUI_ABI_BASELINE_DIR=%s\n' \
+            "$baseline_dir" >> "$GITHUB_ENV"
+
+      - name: Configure ABI baseline build
+        run: >
+          cmake -G Ninja
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-abi"
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=ON
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=OFF
+          -DUNIGUI_INSTALL=ON
+          $ABI_BASELINE_OPTIONS
+
+      - name: Build and verify ABI targets
+        run: |
+          cmake --build "${{ github.workspace }}/build-abi" --target unigui unigui_imgui unigui_implot --parallel
+          ctest --test-dir "${{ github.workspace }}/build-abi" --label-regex abi --output-on-failure
+
+      - name: Capture semantic ABI and symbol manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${{ github.workspace }}/release-abi"
+          mkdir -p "$output"
+          for entry in \
+            "UniGUI:${{ github.workspace }}/build-abi/src/libUniGUI.so" \
+            "UniGUI-imgui:${{ github.workspace }}/build-abi/libUniGUI-imgui.so" \
+            "UniGUI-implot:${{ github.workspace }}/build-abi/libUniGUI-implot.so"; do
+            name=${entry%%:*}
+            library=${entry#*:}
+            readelf -SW "$library" | grep -q '[.]debug_info'
+            abidw --no-corpus-path \
+              --out-file "$output/$name.abi" "$library"
+            test -s "$output/$name.abi"
+            LC_ALL=C nm -D --defined-only --with-symbol-versions "$library" \
+              | awk '{ print $2, $3 }' | sort -u > "$output/$name.symbols"
+          done
+
+      - name: Attest ABI baseline
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: ${{ github.workspace }}/release-abi/*
+
+      - name: Upload ABI baseline
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-abi-linux-x64
+          path: release-abi
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228
+        with:
+          generate_release_notes: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: release-assets/**

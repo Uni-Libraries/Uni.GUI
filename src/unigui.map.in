@@ -1,0 +1,18 @@
+UNIGUI_@UNIGUI_ABI_VERSION@ {
+    global:
+        _ZN3Uni3GUI5UiApp*;
+        _ZNK3Uni3GUI5UiApp*;
+        _ZN3Uni3GUI9UiTexture*;
+        _ZNK3Uni3GUI9UiTexture*;
+        _ZN3Uni3GUI12UiDispatcher*;
+        _ZNK3Uni3GUI12UiDispatcher*;
+        _ZN3Uni3GUI15UiCommandTicket*;
+        _ZNK3Uni3GUI15UiCommandTicket*;
+        _ZN3Uni3GUI5Nodes*;
+        _ZNK3Uni3GUI5Nodes*;
+        _ZTVN3Uni3GUI5Nodes*;
+        _ZTIN3Uni3GUI5Nodes*;
+        _ZTSN3Uni3GUI5Nodes*;
+    local:
+        *;
+};

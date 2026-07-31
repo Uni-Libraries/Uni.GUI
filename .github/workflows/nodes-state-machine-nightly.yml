@@ -1,0 +1,116 @@
+name: Nodes nightly state machine
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
+  SDL_PREFIX: ${{ github.workspace }}/../sdl3
+
+jobs:
+  randomized-state-machine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+
+      - name: Checkout pinned SDL 3.4.12
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: libsdl-org/SDL
+          ref: ${{ env.SDL_COMMIT_ID }}
+          path: sdl-source
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf autoconf-archive automake libtool libltdl-dev \
+            build-essential git make pkg-config cmake ninja-build \
+            gnome-desktop-testing libasound2-dev libpulse-dev libaudio-dev \
+            libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
+            libdbus-1-dev libibus-1.0-dev \
+            libudev-dev libthai-dev libpipewire-0.3-dev libwayland-dev \
+            libdecor-0-dev liburing-dev libusb-1.0-0-dev
+
+      - name: Build and install pinned SDL 3.4.12
+        run: |
+          cmake -G Ninja \
+            -S "${{ github.workspace }}/sdl-source" \
+            -B "${{ runner.temp }}/sdl-build" \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${{ env.SDL_PREFIX }}" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_INSTALL_DOCS=OFF \
+            -DSDL_UNINSTALL=OFF \
+            -DCMAKE_C_FLAGS="-g3 -fno-omit-frame-pointer"
+          cmake --build "${{ runner.temp }}/sdl-build" --parallel
+          cmake --install "${{ runner.temp }}/sdl-build"
+
+      - name: Configure
+        run: >
+          cmake -G Ninja
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-nightly"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=OFF
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=OFF
+          -DUNIGUI_INSTALL=OFF
+
+      - name: Build state machine
+        run: cmake --build "${{ github.workspace }}/build-nightly" --target unigui_nodes_state_machine_tests --parallel
+
+      - name: Generate reproducible seeds
+        shell: bash
+        run: |
+          mkdir -p "${{ github.workspace }}/nightly-traces"
+          : > "${{ github.workspace }}/nightly-traces/seeds.txt"
+          for index in $(seq 0 15); do
+            material="${GITHUB_SHA}:${GITHUB_RUN_ID}:${index}"
+            hash=$(printf '%s' "$material" | sha256sum | cut -c1-16)
+            printf '0x%s\n' "$hash" >> "${{ github.workspace }}/nightly-traces/seeds.txt"
+          done
+
+      - name: Run randomized seeds
+        shell: bash
+        env:
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+        run: |
+          status=0
+          while IFS= read -r seed; do
+            trace="${{ github.workspace }}/nightly-traces/trace-${seed}.txt"
+            printf 'Running seed %s\n' "$seed"
+            "${{ github.workspace }}/build-nightly/tests/unigui_nodes_state_machine_tests" \
+              --seed "$seed" --steps 20000 --trace-file "$trace" || status=1
+          done < "${{ github.workspace }}/nightly-traces/seeds.txt"
+          exit "$status"
+
+      - name: Upload seed manifest and traces
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nodes-state-machine-${{ github.run_id }}-${{ github.run_attempt }}
+          path: nightly-traces
+          if-no-files-found: error
+          retention-days: 14

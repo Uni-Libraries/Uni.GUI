@@ -1,95 +1,548 @@
-name: CMake on multiple platforms
+name: CMake quality matrix
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: unigui-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_COMMIT_ID: 1600ce2ba1b6b621bfc5a31a785c4963b817a1c7
+  SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
+  SDL_PREFIX: ${{ github.workspace }}/../sdl3
+  SYNTHETIC_RELEASE_TAG: v1.0.0
+  ABI_MAJOR: 1
 
 jobs:
-  build:
+  package-preflight:
+    name: Repository package preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - &checkout-repository
+        name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+
+      - name: Verify required tracked package files
+        run: >
+          cmake
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -DREQUIRE_TRACKED=ON
+          -P "${{ github.workspace }}/cmake/VerifyRepositoryFiles.cmake"
+
+      - name: Verify documentation links
+        run: >
+          cmake
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -P "${{ github.workspace }}/cmake/VerifyDocumentationLinks.cmake"
+
+      - name: Verify version metadata
+        run: >
+          cmake
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -P "${{ github.workspace }}/cmake/VerifyVersionMetadata.cmake"
+
+      - name: Verify synthetic final release readiness
+        run: >
+          cmake
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -DEXPECTED_TAG="${{ env.SYNTHETIC_RELEASE_TAG }}"
+          -P "${{ github.workspace }}/cmake/VerifyReleaseVersion.cmake"
+
+  build-test-install:
+    name: ${{ matrix.name }} ${{ matrix.build_type }} shared=${{ matrix.shared }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      SDL_C_COMPILER: ${{ matrix.c_compiler }}
+      SDL_BUILD_TYPE: ${{ matrix.build_type }}
 
     strategy:
       fail-fast: false
-
       matrix:
-        os: [ubuntu-latest, windows-2025]
-        build_type: [Release]
-        c_compiler: [gcc, clang, cl]
+        compiler: [gcc, clang, msvc, apple-clang-x64, apple-clang-arm64]
+        build_type: [Debug, Release]
+        shared: [ON, OFF]
         include:
-          - os: windows-2025
+          - compiler: gcc
+            name: Linux GCC
+            os: ubuntu-24.04
+            c_compiler: gcc
+            cxx_compiler: g++
+          - compiler: clang
+            name: Linux Clang
+            os: ubuntu-24.04
+            c_compiler: clang
+            cxx_compiler: clang++
+          - compiler: msvc
+            name: Windows MSVC
+            os: windows-2025-vs2026
             c_compiler: cl
-            cpp_compiler: cl
+            cxx_compiler: cl
             vcpkg_triplet: x64-windows
-            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
-
-          - os: ubuntu-latest
-            c_compiler: gcc
-            cpp_compiler: g++
-            vcpkg_triplet: x64-linux
-            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
-
-          - os: ubuntu-latest
+          - compiler: apple-clang-x64
+            name: macOS AppleClang x64
+            os: macos-26-intel
             c_compiler: clang
-            cpp_compiler: clang++
-            vcpkg_triplet: x64-linux
-            vcpkg_commit_id: 1e199d32ad53aab1defda61ce41c380302e3f95c
-        exclude:
-          - os: windows-2025
-            c_compiler: gcc
-
-          - os: windows-2025
+            cxx_compiler: clang++
+            vcpkg_triplet: x64-osx
+            osx_architecture: x86_64
+          - compiler: apple-clang-arm64
+            name: macOS AppleClang ARM64
+            os: macos-26
             c_compiler: clang
-
-          - os: ubuntu-latest
-            c_compiler: cl
+            cxx_compiler: clang++
+            vcpkg_triplet: arm64-osx
+            osx_architecture: arm64
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: 'true'
+      - *checkout-repository
 
-    - name: Install development packages
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          autoconf autoconf-archive automake libtool libltdl-dev \
-          build-essential git make pkg-config cmake ninja-build \
-          gnome-desktop-testing libasound2-dev libpulse-dev libaudio-dev \
-          libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
-          libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
-          libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev \
-          libgles2-mesa-dev libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev \
-          libudev-dev libthai-dev libpipewire-0.3-dev libwayland-dev \
-          libdecor-0-dev liburing-dev
+      - &checkout-sdl
+        name: Checkout pinned SDL 3.4.12
+        if: runner.os == 'Linux'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: libsdl-org/SDL
+          ref: ${{ env.SDL_COMMIT_ID }}
+          path: sdl-source
+          persist-credentials: false
 
-    - name: Setup vcpkg
-      id: runvcpkg
-      uses: lukka/run-vcpkg@v11
-      with:
-        vcpkgDirectory: '${{ runner.workspace }}/b/vcpkg'
-        vcpkgGitCommitId: '${{ matrix.vcpkg_commit_id }}'
+      - &install-linux-build-dependencies
+        name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf autoconf-archive automake libtool libltdl-dev \
+            build-essential clang llvm git make pkg-config cmake ninja-build xvfb \
+            gnome-desktop-testing libasound2-dev libpulse-dev libaudio-dev \
+            libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxtst-dev libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev \
+            libgles2-mesa-dev libegl1-mesa-dev libvulkan-dev mesa-vulkan-drivers \
+            libdbus-1-dev libibus-1.0-dev \
+            libudev-dev libthai-dev libpipewire-0.3-dev libwayland-dev \
+            libdecor-0-dev liburing-dev libusb-1.0-0-dev fonts-dejavu-core
 
-    - name: Install SDL3 via vcpkg
-      run: vcpkg install sdl3:${{ matrix.vcpkg_triplet }}
+      - &build-install-sdl
+        name: Build and install pinned SDL 3.4.12
+        if: runner.os == 'Linux'
+        run: |
+          cmake -G Ninja \
+            -S "${{ github.workspace }}/sdl-source" \
+            -B "${{ runner.temp }}/sdl-build" \
+            -DCMAKE_C_COMPILER="${{ env.SDL_C_COMPILER }}" \
+            -DCMAKE_BUILD_TYPE="${{ env.SDL_BUILD_TYPE }}" \
+            -DCMAKE_INSTALL_PREFIX="${{ env.SDL_PREFIX }}" \
+            -DSDL_SHARED=ON \
+            -DSDL_STATIC=OFF \
+            -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF \
+            -DSDL_EXAMPLES=OFF \
+            -DSDL_INSTALL_DOCS=OFF \
+            -DSDL_UNINSTALL=OFF \
+            -DCMAKE_C_FLAGS="-g3 -fno-omit-frame-pointer"
+          cmake --build "${{ runner.temp }}/sdl-build" --parallel
+          cmake --install "${{ runner.temp }}/sdl-build"
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+      - &setup-vcpkg
+        name: Setup vcpkg
+        if: runner.os != 'Linux'
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
+        with:
+          vcpkgDirectory: '${{ runner.temp }}/vcpkg'
+          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT_ID }}'
 
-    - name: Configure CMake
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake
-        -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }}
-        -S ${{ github.workspace }}
+      - &install-vcpkg-sdl
+        name: Install SDL3 with vcpkg
+        if: runner.os != 'Linux'
+        run: vcpkg install "sdl3[vulkan]:${{ matrix.vcpkg_triplet }}"
 
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+      - &configure-build
+        name: Configure
+        run: >
+          cmake
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }}
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_architecture }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          ${{ runner.os != 'Linux' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_ROOT) || '' }}
+          ${{ runner.os != 'Linux' && format('-DVCPKG_TARGET_TRIPLET={0}', matrix.vcpkg_triplet) || '' }}
+          ${{ runner.os == 'Linux' && format('-DCMAKE_PREFIX_PATH={0}', env.SDL_PREFIX) || '' }}
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage"
+          -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+          -DUNIGUI_BUILD_DEMO=ON
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=${{ runner.os == 'Linux' && 'ON' || 'OFF' }}
+          -DUNIGUI_INSTALL=ON
+
+      - &build-project
+        name: Build
+        run: cmake --build "${{ github.workspace }}/build" --config ${{ matrix.build_type }} --parallel
+
+      - &test-project-linux
+        name: Test on Linux
+        if: runner.os == 'Linux'
+        env:
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+        run: xvfb-run -a ctest --test-dir "${{ github.workspace }}/build" --build-config ${{ matrix.build_type }} --output-on-failure
+
+      - &test-project-windows
+        name: Test on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ github.workspace }}\build\src\${{ matrix.build_type }};${{ github.workspace }}\build\${{ matrix.build_type }};${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\debug\bin;${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\bin;$env:PATH"
+          ctest --test-dir "${{ github.workspace }}/build" --build-config ${{ matrix.build_type }} --output-on-failure
+
+      - &test-project-macos
+        name: Test on macOS
+        if: runner.os == 'macOS'
+        run: ctest --test-dir "${{ github.workspace }}/build" --build-config ${{ matrix.build_type }} --output-on-failure
+
+      - &install-project
+        name: Install
+        run: cmake --install "${{ github.workspace }}/build" --config ${{ matrix.build_type }}
+
+      - &validate-installed-package
+        name: Validate installed package metadata
+        run: >
+          cmake
+          -DINSTALL_PREFIX=${{ github.workspace }}/stage
+          -DSOURCE_DIR=${{ github.workspace }}
+          -DBUILD_DIR=${{ github.workspace }}/build
+          -DEXPECT_STATIC=${{ matrix.shared == 'OFF' && 'ON' || 'OFF' }}
+          -P "${{ github.workspace }}/cmake/ValidateInstalledPackage.cmake"
+
+      - &relocate-installed-package
+        name: Relocate installed package
+        run: cmake -E rename "${{ github.workspace }}/stage" "${{ github.workspace }}/relocated-stage"
+
+      - &configure-installed-consumer
+        name: Configure installed consumer
+        run: >
+          cmake
+          -S "${{ github.workspace }}/tests/package"
+          -B "${{ github.workspace }}/consumer"
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }}
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_architecture }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          ${{ runner.os == 'Windows' && format('-DCMAKE_CONFIGURATION_TYPES={0}', matrix.build_type) || '' }}
+          ${{ runner.os != 'Linux' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_ROOT) || '' }}
+          ${{ runner.os != 'Linux' && format('-DVCPKG_TARGET_TRIPLET={0}', matrix.vcpkg_triplet) || '' }}
+          -DCMAKE_PREFIX_PATH="${{ github.workspace }}/relocated-stage${{ runner.os == 'Linux' && format(';{0}', env.SDL_PREFIX) || '' }}"
+          -DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF
+          -DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF
+
+      - &build-installed-consumer
+        name: Build installed consumer
+        run: cmake --build "${{ github.workspace }}/consumer" --config ${{ matrix.build_type }} --parallel
+
+      - &run-installed-consumer-unix
+        name: Run installed consumer on Unix
+        if: runner.os != 'Windows'
+        run: |
+          export LD_LIBRARY_PATH="${{ github.workspace }}/relocated-stage/lib:${{ github.workspace }}/relocated-stage/lib64:${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="${{ github.workspace }}/relocated-stage/lib:${{ github.workspace }}/relocated-stage/lib64:${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64:${DYLD_LIBRARY_PATH:-}"
+          ctest --test-dir "${{ github.workspace }}/consumer" --build-config ${{ matrix.build_type }} --output-on-failure
+
+      - &run-installed-consumer-windows
+        name: Run installed consumer on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ github.workspace }}\relocated-stage\bin;${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\debug\bin;${{ env.VCPKG_ROOT }}\installed\${{ matrix.vcpkg_triplet }}\bin;$env:PATH"
+          ctest --test-dir "${{ github.workspace }}/consumer" --build-config ${{ matrix.build_type }} --output-on-failure
+
+  imgui-test-engine:
+    name: Linux Dear ImGui Test Engine
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SDL_C_COMPILER: clang
+      SDL_BUILD_TYPE: Debug
+
+    steps:
+      - *checkout-repository
+      - *checkout-sdl
+      - *install-linux-build-dependencies
+      - *build-install-sdl
+
+      - name: Configure Test Engine build
+        run: >
+          cmake
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-test-engine"
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=OFF
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=ON
+          -DUNIGUI_BUILD_TEST_ENGINE_TESTS=ON
+          -DUNIGUI_INSTALL=OFF
+
+      - name: Build Test Engine target
+        run: cmake --build "${{ github.workspace }}/build-test-engine" --target unigui_imgui_test_engine_tests --parallel
+
+      - name: Run Test Engine cases
+        env:
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+          SDL_VIDEO_DRIVER: x11
+        run: xvfb-run -a ctest --test-dir "${{ github.workspace }}/build-test-engine" --label-regex imgui-test-engine --output-on-failure
+
+  sanitizer:
+    name: Linux Clang ASan UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer
+      SDL_VIDEO_DRIVER: x11
+      SDL_C_COMPILER: clang
+      SDL_BUILD_TYPE: Debug
+
+    steps:
+      - *checkout-repository
+      - *checkout-sdl
+      - *install-linux-build-dependencies
+      - *build-install-sdl
+
+      - name: Configure sanitizer build
+        run: >
+          cmake
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-sanitizer"
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=OFF
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=ON
+          -DUNIGUI_BUILD_TEST_ENGINE_TESTS=ON
+          -DUNIGUI_INSTALL=OFF
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build sanitizer configuration
+        run: cmake --build "${{ github.workspace }}/build-sanitizer" --parallel
+
+      - name: Run sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:symbolize=1:fast_unwind_on_malloc=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+        run: xvfb-run -a ctest --test-dir "${{ github.workspace }}/build-sanitizer" --label-exclude "gpu|sdl-callback-loop|sdl-event-queue-fault" --output-on-failure
+
+      - name: Run external-leak sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:symbolize=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+        run: xvfb-run -a ctest --test-dir "${{ github.workspace }}/build-sanitizer" --label-regex "sdl-callback-loop|sdl-event-queue-fault" --output-on-failure
+
+  nodes-performance:
+    name: Linux nodes performance gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SDL_C_COMPILER: gcc
+      SDL_BUILD_TYPE: Release
+
+    steps:
+      - *checkout-repository
+      - *checkout-sdl
+      - *install-linux-build-dependencies
+      - *build-install-sdl
+
+      - name: Configure performance build
+        run: >
+          cmake -G Ninja
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-performance"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=OFF
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=OFF
+          -DUNIGUI_BUILD_BENCHMARKS=ON
+          -DUNIGUI_INSTALL=OFF
+
+      - name: Build performance target
+        run: cmake --build "${{ github.workspace }}/build-performance" --target unigui_nodes_benchmarks --parallel
+
+      - name: Run performance gate
+        env:
+          LD_LIBRARY_PATH: ${{ env.SDL_PREFIX }}/lib:${{ env.SDL_PREFIX }}/lib64
+        run: ctest --test-dir "${{ github.workspace }}/build-performance" --label-regex performance --parallel 1 --output-on-failure
+
+  abi-linux:
+    name: Linux ABI surface
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SDL_C_COMPILER: gcc
+      SDL_BUILD_TYPE: RelWithDebInfo
+
+    steps:
+      - *checkout-repository
+      - *checkout-sdl
+      - *install-linux-build-dependencies
+      - name: Install ABI tooling
+        run: sudo apt-get install -y --no-install-recommends abigail-tools binutils
+      - *build-install-sdl
+
+      - name: Download latest released ABI baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          baseline_tag=$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName \
+            --jq '[.[] | .tagName | select(startswith("v${{ env.ABI_MAJOR }}."))][0] // ""')
+          if [[ -z "$baseline_tag" ]]; then
+            printf 'No released ABI %s baseline exists; this build establishes it.\n' \
+              "${{ env.ABI_MAJOR }}"
+            exit 0
+          fi
+          baseline_dir="${{ github.workspace }}/abi-baseline"
+          mkdir -p "$baseline_dir"
+          gh release download "$baseline_tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.abi' --pattern '*.symbols' --dir "$baseline_dir"
+          for baseline_file in "$baseline_dir"/*; do
+            gh attestation verify "$baseline_file" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$baseline_tag" \
+              --deny-self-hosted-runners
+          done
+          printf 'ABI_BASELINE_OPTIONS=-DUNIGUI_ENABLE_ABI_BASELINE_CHECK=ON -DUNIGUI_ABI_BASELINE_DIR=%s\n' \
+            "$baseline_dir" >> "$GITHUB_ENV"
+
+      - name: Configure ABI build
+        run: >
+          cmake -G Ninja
+          -S "${{ github.workspace }}"
+          -B "${{ github.workspace }}/build-abi"
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_PREFIX_PATH="${{ env.SDL_PREFIX }}"
+          -DBUILD_SHARED_LIBS=ON
+          -DUNIGUI_BUILD_DEMO=OFF
+          -DUNIGUI_BUILD_TESTS=ON
+          -DUNIGUI_ENABLE_RUNTIME_TESTS=OFF
+          -DUNIGUI_INSTALL=ON
+          $ABI_BASELINE_OPTIONS
+
+      - name: Build ABI targets
+        run: cmake --build "${{ github.workspace }}/build-abi" --target unigui unigui_imgui unigui_implot --parallel
+
+      - name: Verify loader and symbol version identities
+        run: ctest --test-dir "${{ github.workspace }}/build-abi" --label-regex abi --output-on-failure
+
+      - name: Capture semantic ABI and symbol manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${{ github.workspace }}/abi-current"
+          mkdir -p "$output"
+          for entry in \
+            "UniGUI:${{ github.workspace }}/build-abi/src/libUniGUI.so" \
+            "UniGUI-imgui:${{ github.workspace }}/build-abi/libUniGUI-imgui.so" \
+            "UniGUI-implot:${{ github.workspace }}/build-abi/libUniGUI-implot.so"; do
+            name=${entry%%:*}
+            library=${entry#*:}
+            readelf -SW "$library" | grep -q '[.]debug_info'
+            abidw --no-corpus-path \
+              --out-file "$output/$name.abi" "$library"
+            test -s "$output/$name.abi"
+            LC_ALL=C nm -D --defined-only --with-symbol-versions "$library" \
+              | awk '{ print $2, $3 }' | sort -u > "$output/$name.symbols"
+          done
+
+      - name: Upload ABI evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: abi-linux-${{ github.sha }}
+          path: abi-current
+          if-no-files-found: error
+          retention-days: 30
+
+  ubuntu-26-preview:
+    name: Ubuntu 26.04 preview
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    continue-on-error: true
+    env:
+      SDL_C_COMPILER: gcc
+      SDL_BUILD_TYPE: Release
+
+    strategy:
+      matrix:
+        include:
+          - name: Linux GCC preview
+            c_compiler: gcc
+            cxx_compiler: g++
+            build_type: Release
+            shared: ON
+
+    steps:
+      - *checkout-repository
+      - *checkout-sdl
+      - *install-linux-build-dependencies
+      - *build-install-sdl
+      - *setup-vcpkg
+      - *install-vcpkg-sdl
+      - *configure-build
+      - *build-project
+      - *test-project-linux
+      - *test-project-windows
+      - *test-project-macos
+      - *install-project
+      - *validate-installed-package
+      - *relocate-installed-package
+      - *configure-installed-consumer
+      - *build-installed-consumer
+      - *run-installed-consumer-unix
+      - *run-installed-consumer-windows
+
+  required-summary:
+    name: Required quality summary
+    if: always()
+    needs:
+      - package-preflight
+      - build-test-install
+      - imgui-test-engine
+      - sanitizer
+      - nodes-performance
+      - abi-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every required job to succeed
+        shell: bash
+        run: |
+          if [[ "${{ needs.package-preflight.result }}" != "success" || \
+                "${{ needs.build-test-install.result }}" != "success" || \
+                "${{ needs.imgui-test-engine.result }}" != "success" || \
+                "${{ needs.sanitizer.result }}" != "success" || \
+                "${{ needs.nodes-performance.result }}" != "success" || \
+                "${{ needs.abi-linux.result }}" != "success" ]]; then
+            exit 1
+          fi

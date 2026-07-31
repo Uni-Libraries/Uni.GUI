@@ -23,12 +23,15 @@ namespace Uni::GUI{
         ~UiRendererSdl() override;
         bool Init(void* window_handle) override;
         bool InitImgui() override;
-        void NewFrame(std::pair<size_t, size_t> new_size) override;
-        void Render() override;
+        void ShutdownImgui() override;
+        void NewFrame() override;
+        bool Render() override;
         bool SetVsync(int interval) override;
-        [[nodiscard]] const std::string_view GetApiName() const override;
+        [[nodiscard]] std::string_view GetApiName() const override;
     private:
         SDL_Window* m_window{};
         SDL_Renderer* m_renderer{};
+        bool m_imgui_platform_initialized{};
+        bool m_imgui_renderer_initialized{};
     };
 }

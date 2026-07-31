@@ -5,11 +5,7 @@
 //
 
 // stdlib
-#include <cstddef>
-#include <cstdint>
-#include <vector>
 #include <string_view>
-#include <utility>
 
 
 //
@@ -23,10 +19,10 @@ namespace Uni::GUI {
 
         virtual bool Init(void* window_handle) = 0;
         virtual bool InitImgui() = 0;
-        virtual void NewFrame(std::pair<size_t, size_t> new_size) = 0;
-        virtual void Render() = 0;
+        virtual void ShutdownImgui() = 0;
+        virtual void NewFrame() = 0;
+        virtual bool Render() = 0;
         virtual bool SetVsync(int interval) = 0;
-        [[nodiscard]] virtual const std::string_view GetApiName() const { return "unknown"; }
+        [[nodiscard]] virtual std::string_view GetApiName() const { return "unknown"; }
     };
 }
-

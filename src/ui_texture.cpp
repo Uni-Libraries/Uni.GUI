@@ -1,124 +1,115 @@
-//
-// Includes
-//
+#include <uni/gui/texture.h>
 
-// stdlib
-#include <algorithm>
+#include "ui_texture_internal.h"
+
+#include <imgui_internal.h>
+
 #include <cstddef>
 #include <cstdint>
-
-// imgui
-#include <imgui.h>
-
-// uni.gui
-#include "ui_texture.h"
-
-#include "imgui_internal.h"
-
-
-
-//
-// Implementation
-//
+#include <utility>
 
 namespace Uni::GUI {
 
-//
-// Ctor
-//
-
-UiTexture::UiTexture() = default;
+UiTexture::UiTexture() noexcept = default;
 
 UiTexture::~UiTexture() {
-    if (m_data) {
-        ImGui::UnregisterUserTexture(m_data);
-        delete m_data;
-        m_data = nullptr;
-    }
+    Destroy();
 }
 
+UiTexture::UiTexture(UiTexture&& other) noexcept = default;
 
+UiTexture& UiTexture::operator=(UiTexture&& other) noexcept {
+    if (this != &other) {
+        Destroy();
+        m_impl = std::move(other.m_impl);
+    }
+    return *this;
+}
 
-//
-// Accessors
-//
+UiTexture::operator bool() const noexcept {
+    if (!m_impl) {
+        return false;
+    }
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store);
+}
 
-ImTextureRef UiTexture::GetRef() {
-    if (!m_data) {
+ImTextureRef UiTexture::GetRef() const noexcept {
+    if (!m_impl) {
         return {};
     }
-    return m_data->GetTexRef();
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->GetTexRef() : ImTextureRef{};
 }
 
-
-
-//
-// Properties
-//
-
-int UiTexture::Width() const {
-    if (!m_data) {
+int UiTexture::Width() const noexcept {
+    if (!m_impl) {
         return 0;
     }
-    return m_data->Width;
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->Width : 0;
 }
 
-int UiTexture::Height() const {
-    if (!m_data) {
+int UiTexture::Height() const noexcept {
+    if (!m_impl) {
         return 0;
     }
-    return m_data->Height;
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->Height : 0;
 }
 
-int UiTexture::Pitch() const {
-    if (!m_data) {
+int UiTexture::Pitch() const noexcept {
+    if (!m_impl) {
         return 0;
     }
-    return m_data->GetPitch();
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->GetPitch() : 0;
 }
 
-
-
-//
-// Data
-//
-
-void* UiTexture::Pixels() {
-    if (!m_data) {
+void* UiTexture::Pixels() noexcept {
+    if (!m_impl) {
         return nullptr;
     }
-    return m_data->GetPixels();
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->GetPixels() : nullptr;
 }
 
-const void* UiTexture::Pixels() const {
-    if (!m_data) {
+const void* UiTexture::Pixels() const noexcept {
+    if (!m_impl) {
         return nullptr;
     }
-    return m_data->GetPixels();
+    const auto store = m_impl->LockStore();
+    return m_impl->IsUsable(store) ? m_impl->data->GetPixels() : nullptr;
 }
 
-void* UiTexture::PixelsAt(const int x, const int y) {
-    if (!m_data) {
+void* UiTexture::PixelsAt(const int x, const int y) noexcept {
+    if (!m_impl) {
         return nullptr;
     }
-    return m_data->GetPixelsAt(x, y);
-}
-
-const void* UiTexture::PixelsAt(int x, int y) const {
-    if (!m_data) {
+    const auto store = m_impl->LockStore();
+    if (!m_impl->IsUsable(store) || x < 0 || y < 0 || x >= m_impl->data->Width || y >= m_impl->data->Height) {
         return nullptr;
     }
-    return m_data->GetPixelsAt(x, y);
+    return m_impl->data->GetPixelsAt(x, y);
 }
 
+const void* UiTexture::PixelsAt(const int x, const int y) const noexcept {
+    if (!m_impl) {
+        return nullptr;
+    }
+    const auto store = m_impl->LockStore();
+    if (!m_impl->IsUsable(store) || x < 0 || y < 0 || x >= m_impl->data->Width || y >= m_impl->data->Height) {
+        return nullptr;
+    }
+    return m_impl->data->GetPixelsAt(x, y);
+}
 
-
-//
-// Operations
-//
-
-bool UiTexture::Clear(const uint32_t rgba) {
-    if (!m_data) {
+bool UiTexture::Clear(const std::uint32_t rgba) {
+    if (!m_impl) {
+        return false;
+    }
+    const auto store = m_impl->LockStore();
+    if (!m_impl->IsUsable(store)) {
         return false;
     }
 
@@ -127,92 +118,52 @@ bool UiTexture::Clear(const uint32_t rgba) {
     const auto b = static_cast<std::uint8_t>((rgba >> IM_COL32_B_SHIFT) & 0xFFU);
     const auto a = static_cast<std::uint8_t>((rgba >> IM_COL32_A_SHIFT) & 0xFFU);
 
-    auto* px = static_cast<uint8_t*>(Pixels());
-    if (!px) {
-        return false;
-    }
-
-    const auto count = static_cast<std::size_t>(Width()) * static_cast<std::size_t>(Height());
+    auto* pixels = static_cast<std::uint8_t*>(m_impl->data->GetPixels());
+    const auto count = static_cast<std::size_t>(m_impl->data->Width) * static_cast<std::size_t>(m_impl->data->Height);
     for (std::size_t i = 0; i < count; ++i) {
-        px[i * 4U + 0U] = r;
-        px[i * 4U + 1U] = g;
-        px[i * 4U + 2U] = b;
-        px[i * 4U + 3U] = a;
+        pixels[i * 4U + 0U] = r;
+        pixels[i * 4U + 1U] = g;
+        pixels[i * 4U + 2U] = b;
+        pixels[i * 4U + 3U] = a;
     }
 
     return Update();
 }
 
-bool UiTexture::Create(int width, int height) {
-    if (m_data) {
+bool UiTexture::Update() {
+    return UpdateRect(0, 0, Width(), Height());
+}
+
+bool UiTexture::UpdateRect(const int x, const int y, const int width, const int height) {
+    if (!m_impl) {
+        return false;
+    }
+    const auto store = m_impl->LockStore();
+    if (!m_impl->IsUsable(store)) {
         return false;
     }
 
-    if (width > USHRT_MAX || height > USHRT_MAX) {
+    const auto rect = Detail::ClipTextureRect(m_impl->data->Width, m_impl->data->Height, x, y, width, height);
+    if (!rect) {
         return false;
     }
 
-    m_data = new ImTextureData;
-    m_data->Create(ImTextureFormat_RGBA32, width, height);
-    ImGui::RegisterUserTexture(m_data);
+    ImTextureDataQueueUpload(m_impl->data, rect->x, rect->y, rect->width, rect->height);
     return true;
 }
 
-bool UiTexture::Update() { return UpdateRect(0, 0, Width(), Height()); }
-
-bool UiTexture::UpdateRect(const int x, const int y, const int width, const int height) {
-    if (!m_data || !m_data->Pixels || width <= 0 || height <= 0 || Width() <= 0 || Height() <= 0) {
+bool UiTexture::Destroy() noexcept {
+    if (!m_impl || !m_impl->data) {
         return false;
     }
 
-    const int x0 = std::clamp(x, 0, Width());
-    const int y0 = std::clamp(y, 0, Height());
-    const int x1 = std::clamp(x + width, 0, Width());
-    const int y1 = std::clamp(y + height, 0, Height());
-    if (x1 <= x0 || y1 <= y0) {
-        return false;
+    const auto store = m_impl->LockStore();
+    const bool scheduled = store && store->active;
+    if (scheduled) {
+        m_impl->data->WantDestroyNextFrame = true;
     }
-
-    if (m_data->Status != ImTextureStatus_OK && m_data->Status != ImTextureStatus_WantUpdates) {
-        return false;
-    }
-
-    const ImTextureRect req{
-        static_cast<unsigned short>(x0),
-        static_cast<unsigned short>(y0),
-        static_cast<unsigned short>(x1 - x0),
-        static_cast<unsigned short>(y1 - y0),
-    };
-
-    if (m_data->UpdateRect.w == 0 || m_data->UpdateRect.h == 0) {
-        m_data->UpdateRect = req;
-    } else {
-        const int update_x0 = std::min<int>(m_data->UpdateRect.x, req.x);
-        const int update_y0 = std::min<int>(m_data->UpdateRect.y, req.y);
-        const int update_x1 = std::max<int>(static_cast<int>(m_data->UpdateRect.x) + static_cast<int>(m_data->UpdateRect.w), req.x + req.w);
-        const int update_y1 = std::max<int>(static_cast<int>(m_data->UpdateRect.y) + static_cast<int>(m_data->UpdateRect.h), req.y + req.h);
-        m_data->UpdateRect.x = static_cast<unsigned short>(update_x0);
-        m_data->UpdateRect.y = static_cast<unsigned short>(update_y0);
-        m_data->UpdateRect.w = static_cast<unsigned short>(update_x1 - update_x0);
-        m_data->UpdateRect.h = static_cast<unsigned short>(update_y1 - update_y0);
-    }
-
-    if (m_data->UsedRect.w == 0 || m_data->UsedRect.h == 0) {
-        m_data->UsedRect = req;
-    } else {
-        const int used_x0 = std::min<int>(m_data->UsedRect.x, req.x);
-        const int used_y0 = std::min<int>(m_data->UsedRect.y, req.y);
-        const int used_x1 = std::max<int>(static_cast<int>(m_data->UsedRect.x) + static_cast<int>(m_data->UsedRect.w), req.x + req.w);
-        const int used_y1 = std::max<int>(static_cast<int>(m_data->UsedRect.y) + static_cast<int>(m_data->UsedRect.h), req.y + req.h);
-        m_data->UsedRect.x = static_cast<unsigned short>(used_x0);
-        m_data->UsedRect.y = static_cast<unsigned short>(used_y0);
-        m_data->UsedRect.w = static_cast<unsigned short>(used_x1 - used_x0);
-        m_data->UsedRect.h = static_cast<unsigned short>(used_y1 - used_y0);
-    }
-
-    m_data->SetStatus(ImTextureStatus_WantUpdates);
-    m_data->Updates.push_back(req);
-    return true;
+    m_impl.reset();
+    return scheduled;
 }
 
 } // namespace Uni::GUI

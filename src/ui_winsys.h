@@ -5,10 +5,9 @@
 //
 
 // stdlib
-#include <cstddef>
-#include <cstdint>
-#include <string>
-#include <utility>
+#include <uni/gui/config.h>
+
+#include <SDL3/SDL_events.h>
 
 
 //
@@ -16,23 +15,31 @@
 //
 
 namespace Uni::GUI {
+    enum class UiWinsysInitResult {
+        Success,
+        SdlInitializationFailed,
+        WindowCreationFailed,
+    };
+
     class UiWinsys {
     public:
         virtual ~UiWinsys() = default;
 
-        virtual bool Init(const std::string& title) = 0;
-
-        virtual bool InitImgui() = 0;
+        virtual UiWinsysInitResult Init(const UiAppConfig& config) = 0;
 
         virtual void* GetHandle() = 0;
 
-        virtual bool ProcessEvent(void* event) = 0;
+        [[nodiscard]] virtual float GetDisplayScale() const = 0;
+
+        [[nodiscard]] virtual bool IsMinimized() const = 0;
+
+        virtual bool FeedEvent(const SDL_Event& event) = 0;
+
+        [[nodiscard]] virtual bool IsCloseEvent(const SDL_Event& event) const noexcept = 0;
 
         virtual void NewFrame() = 0;
 
         virtual void Show() = 0;
 
-        virtual std::pair<size_t,size_t> ResizeRequired() = 0;
     };
 }
-
