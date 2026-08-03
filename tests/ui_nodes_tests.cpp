@@ -4216,6 +4216,39 @@ void TestBreakingPolicyArchitecture() {
                document.FindNode(graph, source_id) != nullptr && document.FindLink(graph, cascade_link) != nullptr,
            "A denied cascade leaf must atomically preserve its node and link");
 
+    bool saw_lifecycle_pin_removal = false;
+    GraphPolicy lifecycle_delete;
+    lifecycle_delete.evaluate_operation = [&](const OperationPolicyContext& context,
+                                               const OperationIntent& operation) -> OperationPolicyDecision {
+        if (operation.kind == OperationKind::DeleteElements || operation.kind == OperationKind::Connect) {
+            return AllowOperation{};
+        }
+        if (operation.kind == OperationKind::RemovePin) {
+            const auto* pin = operation.Get<PinOperation>();
+            const bool existed = pin && context.before_document.FindNode(pin->graph, pin->node) != nullptr;
+            const bool exists = pin && context.staged_document.FindNode(pin->graph, pin->node) != nullptr;
+            saw_lifecycle_pin_removal |= pin && existed != exists;
+            return pin && existed != exists ? OperationPolicyDecision{AllowOperation{}}
+                                            : OperationPolicyDecision{DenyOperation{"Standalone pin removal denied"}};
+        }
+        if (operation.kind == OperationKind::SetNodePresentation) {
+            const auto* node = operation.Get<NodePresentationOperation>();
+            const bool existed = node && context.before_document.FindNode(node->graph, node->node) != nullptr;
+            const bool exists = node && context.staged_document.FindNode(node->graph, node->node) != nullptr;
+            return node && existed != exists ? OperationPolicyDecision{AllowOperation{}}
+                                             : OperationPolicyDecision{DenyOperation{"Unrelated presentation denied"}};
+        }
+        return DenyOperation{"Unrelated operation denied"};
+    };
+    auto lifecycle_deleted = commands.Execute(
+        std::make_unique<DeleteElementsCommand>(graph, std::vector<NodeId>{source_id}), document, presentation,
+        types, lifecycle_delete);
+    Expect(lifecycle_deleted && saw_lifecycle_pin_removal && document.FindNode(graph, source_id) == nullptr,
+           "Node lifecycle policy must allow descriptor-owned pin removal during node deletion");
+    Expect(commands.Undo(document, presentation, types).has_value() && document.FindNode(graph, source_id) != nullptr &&
+               document.FindLink(graph, cascade_link) != nullptr,
+           "Lifecycle deletion undo must restore the node and its incident link");
+
     auto integer_source = nodes.Instantiate(document, TypeId{"policy.int-source"});
     auto converter_sink = nodes.Instantiate(document, TypeId{"test.sink"});
     Expect(integer_source && converter_sink, "Converter policy fixtures must instantiate");

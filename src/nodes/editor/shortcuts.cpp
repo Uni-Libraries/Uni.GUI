@@ -16,7 +16,8 @@ void EditorFrame::ProcessShortcuts() {
         const auto* node = document.FindNode(graph_id, selected);
         if (node != nullptr && node->subgraph) enter_subgraph = selected;
     } else if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z)) {
-        auto undone = commands.Undo(document, presentation, registry);
+        auto undone = commands.Undo(
+            document, presentation, policy, UndoPolicyMode::RespectCurrentPolicy, registry);
         if (undone) {
             RecordChange(*undone);
             RefreshGraph();

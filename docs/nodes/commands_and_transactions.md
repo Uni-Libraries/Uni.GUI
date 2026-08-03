@@ -151,6 +151,8 @@ If policy defers an operation, the retained transaction stores a plain immutable
 
 Undo without an explicit policy uses `UndoPolicyMode::RestoreHistory`: it restores the recorded state even if current semantic read-only or presentation lock flags would block a new edit. To authorize undo against current application policy, use the overload with `UndoPolicyMode::RespectCurrentPolicy`. Redo always consults the supplied policy and enforces current protection. See [policies](policies.md#undo-and-redo).
 
+The built-in node-editor Ctrl+Z shortcut uses `RespectCurrentPolicy` with the `GraphPolicy` passed to `DrawEditor()`. Application code that invokes `CommandStack::Undo()` directly chooses the mode explicitly.
+
 ## Binding And Conflicts
 
 Once it owns history, a command stack is bound to one document identity, one presentation identity, one logical `RegistryCatalog` identity, and the expected document/presentation revisions. It rejects:
