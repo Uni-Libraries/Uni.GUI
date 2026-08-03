@@ -1,5 +1,6 @@
 #pragma once
 
+#include <uni/gui/nodes/editor.h>
 #include <uni/gui/nodes/error.h>
 #include <uni/gui/nodes/routing.h>
 
@@ -9,6 +10,21 @@
 #include <vector>
 
 namespace Uni::GUI::Nodes::Detail {
+
+struct EditorViewTransform final {
+    Vec2 canvas_origin;
+    Vec2 pan;
+    float ui_scale{1.0f};
+    float zoom{1.0f};
+
+    [[nodiscard]] Vec2 ToScreen(Vec2 graph_position) const noexcept;
+    [[nodiscard]] Vec2 ToGraph(Vec2 screen_position) const noexcept;
+    [[nodiscard]] float GraphScale() const noexcept;
+};
+
+[[nodiscard]] float MeasureNodeHeaderHeight(
+    float reference_font_size,
+    const NodeHeaderLayout& layout) noexcept;
 
 enum class SpatialKind {
     Node,

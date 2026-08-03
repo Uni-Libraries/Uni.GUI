@@ -1,5 +1,7 @@
 #include "internal/frame.h"
 
+#include <exception>
+#include <string>
 #include <variant>
 
 namespace Uni::GUI::Nodes::EditorDetail {
@@ -76,6 +78,38 @@ void EditorFrame::PasteClipboard(const Vec2 position) {
 }
 
 void EditorFrame::DuplicateSelection() {
+    if (callbacks.duplicate_selection) {
+        const DuplicateSelectionFn callback = callbacks.duplicate_selection;
+        const GraphSelection selection = context.Selection();
+        const Revisions before{document.ModelRevision(), presentation.PresentationRevision()};
+        const std::uint64_t document_identity = document.Identity();
+        const std::uint64_t presentation_identity = presentation.Identity();
+        const std::uint64_t document_allocation = document.AllocationEpoch();
+        const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
+        const std::uint64_t editor_revision = session.external_revision;
+        try {
+            callback(selection);
+        } catch (const std::exception& exception) {
+            session.last_error = std::string{"Duplicate callback failed: "} + exception.what();
+            context_state_invalidated = true;
+            return;
+        } catch (...) {
+            session.last_error = "Duplicate callback failed with an unknown exception";
+            context_state_invalidated = true;
+            return;
+        }
+        if (before != Revisions{document.ModelRevision(), presentation.PresentationRevision()} ||
+            document_identity != document.Identity() || presentation_identity != presentation.Identity() ||
+            document_allocation != document.AllocationEpoch() ||
+            presentation_allocation != presentation.AllocationEpoch() ||
+            editor_revision != session.external_revision) {
+            session.last_error = "Duplicate callbacks must enqueue application work without mutating editor state";
+            context_state_invalidated = true;
+        } else {
+            session.last_error.clear();
+        }
+        return;
+    }
     auto fragment = CaptureGraphFragment(document, presentation, context.Selection());
     if (!fragment) {
         session.last_error = fragment.error().message;
@@ -113,6 +147,7 @@ void EditorFrame::ProcessClipboardRequests() {
     if (session.duplicate_requested) {
         DuplicateSelection();
         session.duplicate_requested = false;
+        if (context_state_invalidated) return;
     }
     if (session.paste_requested) {
         PasteClipboard(*session.paste_requested);

@@ -266,7 +266,7 @@ bool EditorDetail::EditorFrame::DrawContextMenu() {
         if (semantic != nullptr && semantic->subgraph && ImGui::MenuItem("Open subgraph")) {
             enter_subgraph = target.node;
         }
-        if (state != nullptr && ImGui::MenuItem(state->collapsed ? "Expand" : "Collapse")) {
+        if (config.enable_node_collapse && state != nullptr && ImGui::MenuItem(state->collapsed ? "Expand" : "Collapse")) {
             pending_commands.push_back(std::make_unique<SetNodeCollapsedCommand>(
                 target.node, !state->collapsed));
         }
@@ -329,18 +329,18 @@ bool EditorDetail::EditorFrame::DrawContextMenu() {
         }
     } else if (target.kind == ContextMenuTargetKind::Group) {
         const auto* state = presentation.FindGroup(target.group);
-        ImGui::SetNextItemWidth(240.0f);
+        ImGui::SetNextItemWidth(ScaleUi(240.0f));
         (void)ImGui::InputText(
             "Title", session.group_title.data(), session.group_title.size(), ImGuiInputTextFlags_EnterReturnsTrue);
         const bool title_deactivated = ImGui::IsItemDeactivatedAfterEdit();
         bool body_deactivated = false;
         if (state != nullptr && state->style->kind == GroupKind::Comment) {
-            ImGui::SetNextItemWidth(240.0f);
+            ImGui::SetNextItemWidth(ScaleUi(240.0f));
             (void)ImGui::InputTextMultiline(
                 "Body",
                 session.group_body.data(),
                 session.group_body.size(),
-                {240.0f, 90.0f},
+                {ScaleUi(240.0f), ScaleUi(90.0f)},
                 ImGuiInputTextFlags_CtrlEnterForNewLine);
             body_deactivated = ImGui::IsItemDeactivatedAfterEdit();
         }
@@ -452,7 +452,7 @@ bool EditorDetail::EditorFrame::DrawCreatePalette(const bool open_popup) {
         result.selection = context.Selection();
         return false;
     }
-    ImGui::SetNextItemWidth(260.0f);
+    ImGui::SetNextItemWidth(ScaleUi(260.0f));
     ImGui::InputTextWithHint(
         "##search", "Search nodes...", session.popup_search.data(), session.popup_search.size());
     ImGui::Separator();
@@ -584,7 +584,6 @@ bool EditorDetail::EditorFrame::DrawCreatePalette(const bool open_popup) {
 bool EditorDetail::EditorFrame::DrawMenus() {
     OpenContextMenu();
     open_create_popup = false;
-    context_state_invalidated = false;
     if (!DrawContextMenu()) return false;
     return DrawCreatePalette(open_create_popup);
 }

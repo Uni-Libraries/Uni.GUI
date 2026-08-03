@@ -75,16 +75,16 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
         if (pin == graph->pins.end()) continue;
         if (pin->second.direction == PinDirection::Input) {
             ++input_count;
-            input_gutter = std::max(input_gutter, ImGui::CalcTextSize(pin->second.label.c_str()).x + 18.0f);
+            input_gutter = std::max(input_gutter, TextSizeInGraph(pin->second.label).x + 18.0f);
         } else {
             ++output_count;
-            output_gutter = std::max(output_gutter, ImGui::CalcTextSize(pin->second.label.c_str()).x + 18.0f);
+            output_gutter = std::max(output_gutter, TextSizeInGraph(pin->second.label).x + 18.0f);
         }
     }
 
     NodeUiLayout layout;
     layout.body = GraphRect{
-        {input_gutter + 8.0f, config.title_height + 8.0f},
+        {input_gutter + 8.0f, header_height + 8.0f},
         {size.x - output_gutter - 8.0f, size.y - 8.0f},
     };
     std::size_t input_index = 0;
@@ -96,9 +96,9 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
         const std::size_t index = input ? input_index++ : output_index++;
         const std::size_t count = input ? input_count : output_count;
         const float y = collapsed
-            ? config.title_height * (static_cast<float>(index) + 1.0f) /
+            ? header_height * (static_cast<float>(index) + 1.0f) /
                 (static_cast<float>(count) + 1.0f)
-            : config.title_height + config.pin_spacing * (static_cast<float>(index) + 0.5f);
+            : header_height + config.pin_spacing * (static_cast<float>(index) + 0.5f);
         layout.pins.push_back(PinPlacement{
             .pin = pin_id,
             .position = {input ? 0.0f : size.x, y},
@@ -128,7 +128,7 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
             .node = node,
             .node_size = size,
             .collapsed = collapsed,
-            .title_height = config.title_height,
+            .header_height = header_height,
             .pin_spacing = config.pin_spacing,
         }));
     } catch (const std::exception& exception) {
@@ -165,7 +165,7 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
             placement.label.pivot.x <= 1.0f && placement.label.pivot.y >= 0.0f &&
             placement.label.pivot.y <= 1.0f;
         if (placement.label.visible && graph->pins.contains(placement.pin)) {
-            const ImVec2 text = ImGui::CalcTextSize(graph->pins.at(placement.pin).label.c_str());
+            const Vec2 text = TextSizeInGraph(graph->pins.at(placement.pin).label);
             valid = valid && Bounded({
                 label_anchor.x - text.x * placement.label.pivot.x,
                 label_anchor.y - text.y * placement.label.pivot.y,
@@ -204,11 +204,14 @@ bool EditorFrame::EnsureGeometryCache() {
         cache.presentation_geometry_revision == presentation.GeometryRevision() &&
         cache.ui_layout_revision == ui.LayoutRevision() && cache.router_revision == routers.Revision() &&
         cache.manual_revision == session.manual_geometry_revision && cache.font == ImGui::GetFont() &&
-        cache.font_size == ImGui::GetFontSize() && cache.node_width == config.node_width &&
-        cache.title_height == config.title_height && cache.pin_spacing == config.pin_spacing &&
-        cache.handle_size == style.handle_size && cache.minimum_node_size == config.minimum_node_size &&
+        cache.reference_font_size == ImGui::GetFontSize() / ui_scale && cache.node_width == config.node_width &&
+        cache.header_height == header_height && cache.header_layout == config.node_header &&
+        cache.pin_spacing == config.pin_spacing &&
+        cache.resize_handle_size == style.resize_handle_size &&
+        cache.minimum_node_size == config.minimum_node_size &&
         cache.default_router == config.default_link_router &&
-        cache.maximum_router_segments == config.maximum_router_segments;
+        cache.maximum_router_segments == config.maximum_router_segments &&
+        cache.enable_node_collapse == config.enable_node_collapse;
     if (cache_matches) return true;
 
     GeometryCache rebuilt;
@@ -224,14 +227,16 @@ bool EditorFrame::EnsureGeometryCache() {
     rebuilt.router_revision = routers.Revision();
     rebuilt.manual_revision = session.manual_geometry_revision;
     rebuilt.font = ImGui::GetFont();
-    rebuilt.font_size = ImGui::GetFontSize();
+    rebuilt.reference_font_size = ImGui::GetFontSize() / ui_scale;
     rebuilt.node_width = config.node_width;
-    rebuilt.title_height = config.title_height;
+    rebuilt.header_height = header_height;
+    rebuilt.header_layout = config.node_header;
     rebuilt.pin_spacing = config.pin_spacing;
-    rebuilt.handle_size = style.handle_size;
+    rebuilt.resize_handle_size = style.resize_handle_size;
     rebuilt.minimum_node_size = config.minimum_node_size;
     rebuilt.default_router = config.default_link_router;
     rebuilt.maximum_router_segments = config.maximum_router_segments;
+    rebuilt.enable_node_collapse = config.enable_node_collapse;
 
     for (const auto& [group_id, group_state] : presentation.Groups()) {
         (void)group_id;
@@ -260,6 +265,8 @@ bool EditorFrame::EnsureGeometryCache() {
             persisted->size.x >= 0.0f && persisted->size.y >= 0.0f) {
             state = *persisted;
         }
+        if (!config.enable_node_collapse)
+            state.collapsed = false;
         rebuilt.resolved_nodes.emplace(node, std::move(state));
     }
     std::ranges::sort(rebuilt.ordered_nodes, [&](const NodeId first, const NodeId second) {
@@ -288,18 +295,20 @@ bool EditorFrame::EnsureGeometryCache() {
             pin->second.direction == PinDirection::Input ? ++input_count : ++output_count;
         }
         const auto* descriptor = ui.Find(node.type);
-        const float width = state.size.x > 0.0f
+        const Vec2 minimum_size = MinimumNodeSize();
+        const float requested_width = state.size.x > 0.0f
             ? state.size.x
             : std::max(config.node_width, descriptor != nullptr ? descriptor->default_size.x : 0.0f);
+        const float width = std::max(requested_width, minimum_size.x);
         const float pin_rows = static_cast<float>(std::max(input_count, output_count));
         float automatic_height = state.collapsed
-            ? config.title_height
-            : std::max(config.title_height + 12.0f,
-                config.title_height + pin_rows * config.pin_spacing + 10.0f);
+            ? header_height
+            : std::max(header_height + 12.0f,
+                header_height + pin_rows * config.pin_spacing + 10.0f);
         if (descriptor != nullptr) automatic_height = std::max(automatic_height, descriptor->default_size.y);
         const float height = state.collapsed
-            ? config.title_height
-            : (state.size.y > 0.0f ? std::max(state.size.y, config.title_height) : automatic_height);
+            ? header_height
+            : std::max(state.size.y > 0.0f ? state.size.y : automatic_height, minimum_size.y);
         const Vec2 size{width, height};
         auto layout = ResolveNodeLayout(node, size, state.collapsed, state.position);
         if (ui_callback_invalidated || !layout) return false;
@@ -311,14 +320,14 @@ bool EditorFrame::EnsureGeometryCache() {
             .id = node_id,
             .bounds = {state.position, state.position + size},
             .spatial_bounds = {state.position, state.position + size},
-            .title = {state.position, state.position + Vec2{width, config.title_height}},
+            .title = {state.position, state.position + Vec2{width, header_height}},
             .body = translate(layout->body.value_or(GraphRect{})),
             .collapse = {
-                state.position + Vec2{width - (config.title_height - 4.0f), 2.0f},
-                state.position + Vec2{width - 2.0f, config.title_height - 2.0f},
+                state.position + Vec2{width - config.node_header.collapse_width, 2.0f},
+                state.position + Vec2{width - 2.0f, header_height - 2.0f},
             },
             .resize = {
-                state.position + size - Vec2{style.handle_size, style.handle_size},
+                state.position + size - Vec2{style.resize_handle_size, style.resize_handle_size},
                 state.position + size,
             },
         };
@@ -336,7 +345,7 @@ bool EditorFrame::EnsureGeometryCache() {
                 geometry.spatial_bounds, GraphRect{pin.position, pin.position});
             const auto semantic_pin = graph->pins.find(pin.id);
             if (!state.collapsed && pin.label.visible && semantic_pin != graph->pins.end()) {
-                const ImVec2 text = ImGui::CalcTextSize(semantic_pin->second.label.c_str());
+                const Vec2 text = TextSizeInGraph(semantic_pin->second.label);
                 const Vec2 anchor = pin.position + pin.label.offset;
                 geometry.spatial_bounds = Detail::Union(geometry.spatial_bounds, GraphRect{
                     .min = {
@@ -380,7 +389,7 @@ bool EditorFrame::EnsureGeometryCache() {
                 group.position + Vec2{group.size.x - 2.0f, 26.0f},
             },
             .resize = {
-                group.position + visible_size - Vec2{style.handle_size, style.handle_size},
+                group.position + visible_size - Vec2{style.resize_handle_size, style.resize_handle_size},
                 group.position + visible_size,
             },
         };
@@ -677,12 +686,12 @@ bool EditorFrame::BuildTransientGeometry() {
         if (resizing_current) {
             const auto* resizing = std::get_if<ResizingNode>(&session.interaction);
             graph_max = graph_min + resizing->current;
-            title = {graph_min, {graph_max.x, graph_min.y + config.title_height}};
+            title = {graph_min, {graph_max.x, graph_min.y + header_height}};
             const GraphRect local_body = resized_layout->body.value_or(GraphRect{});
             body = {graph_min + local_body.min, graph_min + local_body.max};
             collapse = {
-                graph_min + Vec2{resizing->current.x - (config.title_height - 4.0f), 2.0f},
-                graph_min + Vec2{resizing->current.x - 2.0f, config.title_height - 2.0f},
+                graph_min + Vec2{resizing->current.x - config.node_header.collapse_width, 2.0f},
+                graph_min + Vec2{resizing->current.x - 2.0f, header_height - 2.0f},
             };
             spatial = {graph_min, graph_max};
             frame_pins.clear();
@@ -698,7 +707,7 @@ bool EditorFrame::BuildTransientGeometry() {
                 const auto semantic_pin = graph->pins.find(pin.id);
                 if (!resolved_nodes.at(node_id).collapsed && pin.label.visible &&
                     semantic_pin != graph->pins.end()) {
-                    const ImVec2 text = ImGui::CalcTextSize(semantic_pin->second.label.c_str());
+                    const Vec2 text = TextSizeInGraph(semantic_pin->second.label);
                     const Vec2 anchor = pin.position + pin.label.offset;
                     spatial = Detail::Union(spatial, GraphRect{
                         {
@@ -729,7 +738,7 @@ bool EditorFrame::BuildTransientGeometry() {
             .body_max = ToScreen(body.max),
             .collapse_min = ToScreen(collapse.min),
             .collapse_max = ToScreen(collapse.max),
-            .resize_min = ToScreen(graph_max - Vec2{style.handle_size, style.handle_size}),
+            .resize_min = ToScreen(graph_max - Vec2{style.resize_handle_size, style.resize_handle_size}),
             .resize_max = ToScreen(graph_max),
         };
         for (const auto& pin : frame_pins) {
@@ -762,7 +771,7 @@ bool EditorFrame::BuildTransientGeometry() {
             .title_max = ToScreen({graph_max.x, std::min(graph_max.y, graph_min.y + 30.0f)}),
             .collapse_min = ToScreen({graph_max.x - 26.0f, graph_min.y + 2.0f}),
             .collapse_max = ToScreen({graph_max.x - 2.0f, graph_min.y + 26.0f}),
-            .resize_min = ToScreen(graph_max - Vec2{style.handle_size, style.handle_size}),
+            .resize_min = ToScreen(graph_max - Vec2{style.resize_handle_size, style.resize_handle_size}),
             .resize_max = ToScreen(graph_max),
         });
     }
@@ -852,18 +861,18 @@ bool EditorFrame::BuildTransientGeometry() {
 
 bool EditorFrame::ApplyViewportNavigation() {
     const bool pointer_over_minimap_region = config.show_minimap &&
-        config.minimap_size.x + 8.0f < canvas_size.x &&
-        config.minimap_size.y + 8.0f < canvas_size.y &&
-        mouse.x >= canvas_max.x - config.minimap_size.x - 8.0f &&
-        mouse.y >= canvas_max.y - config.minimap_size.y - 8.0f;
+        ScaleUi(config.minimap_size.x + 8.0f) < canvas_size.x &&
+        ScaleUi(config.minimap_size.y + 8.0f) < canvas_size.y &&
+        mouse.x >= canvas_max.x - ScaleUi(config.minimap_size.x + 8.0f) &&
+        mouse.y >= canvas_max.y - ScaleUi(config.minimap_size.y + 8.0f);
     if (canvas_hovered && !PointerOverUiBody() && !pointer_over_minimap_region &&
         ImGui::GetIO().MouseWheel != 0.0f && std::holds_alternative<Idle>(session.interaction)) {
         const Vec2 graph_under_mouse = ToGraph(mouse);
         const float factor = std::pow(config.zoom_step, ImGui::GetIO().MouseWheel);
         session.zoom = std::clamp(session.zoom * factor, config.min_zoom, config.max_zoom);
         session.pan = {
-            mouse.x - canvas_origin.x - graph_under_mouse.x * session.zoom,
-            mouse.y - canvas_origin.y - graph_under_mouse.y * session.zoom,
+            (mouse.x - canvas_origin.x) / ui_scale - graph_under_mouse.x * session.zoom,
+            (mouse.y - canvas_origin.y) / ui_scale - graph_under_mouse.y * session.zoom,
         };
         session.pan = ClampPan(session.pan);
         if (!BuildTransientGeometry()) return false;
@@ -930,7 +939,8 @@ bool EditorFrame::ApplyViewportNavigation() {
         const float graph_width = std::max(bounds_max.x - bounds_min.x, 1.0f);
         const float graph_height = std::max(bounds_max.y - bounds_min.y, 1.0f);
         session.zoom = std::clamp(
-            std::min((canvas_size.x - Padding) / graph_width, (canvas_size.y - Padding) / graph_height),
+            std::min((canvas_size.x / ui_scale - Padding) / graph_width,
+                     (canvas_size.y / ui_scale - Padding) / graph_height),
             config.min_zoom,
             config.max_zoom);
         const Vec2 center{
@@ -938,8 +948,8 @@ bool EditorFrame::ApplyViewportNavigation() {
             (bounds_min.y + bounds_max.y) * 0.5f,
         };
         session.pan = {
-            canvas_size.x * 0.5f - center.x * session.zoom,
-            canvas_size.y * 0.5f - center.y * session.zoom,
+            canvas_size.x * 0.5f / ui_scale - center.x * session.zoom,
+            canvas_size.y * 0.5f / ui_scale - center.y * session.zoom,
         };
         session.pan = ClampPan(session.pan);
         if (!BuildTransientGeometry()) return false;

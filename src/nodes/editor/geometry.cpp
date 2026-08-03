@@ -251,6 +251,30 @@ void IncludeCubicExtrema(
 
 } // namespace
 
+Vec2 EditorViewTransform::ToScreen(const Vec2 graph_position) const noexcept {
+    return canvas_origin + (pan + graph_position * zoom) * ui_scale;
+}
+
+Vec2 EditorViewTransform::ToGraph(const Vec2 screen_position) const noexcept {
+    return ((screen_position - canvas_origin) * (1.0f / ui_scale) - pan) * (1.0f / zoom);
+}
+
+float EditorViewTransform::GraphScale() const noexcept {
+    return ui_scale * zoom;
+}
+
+float MeasureNodeHeaderHeight(
+    const float reference_font_size,
+    const NodeHeaderLayout& layout) noexcept {
+    float text_height = reference_font_size * layout.primary_text_scale;
+    if (layout.maximum_text_lines > 1) {
+        text_height += layout.line_spacing + reference_font_size * layout.secondary_text_scale;
+    }
+    return std::max(
+        layout.minimum_height,
+        layout.vertical_padding * 2.0f + std::max(text_height, layout.item_height));
+}
+
 Result<void> SpatialIndex::Build(const std::span<const SpatialEntry> entries) {
     for (std::size_t index = 0; index < entries.size(); ++index) {
         if (!ValidBounds(entries[index].bounds)) {

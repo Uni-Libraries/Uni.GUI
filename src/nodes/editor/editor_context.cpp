@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace Uni::GUI::Nodes {
@@ -18,6 +19,12 @@ constexpr float MaxEditorCoordinate = 1.0e9f;
 
 [[nodiscard]] bool Finite(const Vec2 value) noexcept {
     return std::isfinite(value.x) && std::isfinite(value.y);
+}
+
+void MarkExternalMutation(EditorDetail::EditorState& state) noexcept {
+    if (state.external_revision != std::numeric_limits<std::uint64_t>::max()) {
+        ++state.external_revision;
+    }
 }
 
 } // namespace
@@ -38,12 +45,12 @@ EditorContext::EditorContext()
 EditorContext::~EditorContext() = default;
 
 EditorContext::EditorContext(EditorContext&& other)
-    : m_impl(std::move(other.m_impl)) {
-    other.m_impl = std::make_unique<Impl>();
+    : m_impl(other.m_impl->draw_active ? std::make_unique<Impl>() : std::move(other.m_impl)) {
+    if (!other.m_impl) other.m_impl = std::make_unique<Impl>();
 }
 
 EditorContext& EditorContext::operator=(EditorContext&& other) {
-    if (this != &other) {
+    if (this != &other && !m_impl->draw_active && !other.m_impl->draw_active) {
         auto replacement = std::make_unique<Impl>();
         m_impl = std::move(other.m_impl);
         other.m_impl = std::move(replacement);
@@ -52,12 +59,16 @@ EditorContext& EditorContext::operator=(EditorContext&& other) {
 }
 
 void EditorContext::Swap(EditorContext& other) noexcept {
-    m_impl.swap(other.m_impl);
+    if (!m_impl->draw_active && !other.m_impl->draw_active) m_impl.swap(other.m_impl);
 }
 
 void EditorContext::SetPan(const Vec2 pan) noexcept {
     if (Finite(pan)) {
-        m_impl->pan = ClampPan(pan);
+        const Vec2 clamped = ClampPan(pan);
+        if (m_impl->pan != clamped) {
+            m_impl->pan = clamped;
+            MarkExternalMutation(*m_impl);
+        }
     }
 }
 
@@ -67,7 +78,10 @@ Vec2 EditorContext::Pan() const noexcept {
 
 void EditorContext::SetZoom(const float zoom) noexcept {
     if (std::isfinite(zoom) && zoom > 0.0f) {
-        m_impl->zoom = zoom;
+        if (m_impl->zoom != zoom) {
+            m_impl->zoom = zoom;
+            MarkExternalMutation(*m_impl);
+        }
     }
 }
 
@@ -75,28 +89,41 @@ float EditorContext::Zoom() const noexcept {
     return m_impl->zoom;
 }
 
-void EditorContext::CopySelection() noexcept { m_impl->copy_requested = true; }
-
-void EditorContext::PasteAt(const Vec2 position) noexcept {
-    if (Finite(position)) m_impl->paste_requested = position;
+void EditorContext::CopySelection() noexcept {
+    m_impl->copy_requested = true;
+    MarkExternalMutation(*m_impl);
 }
 
-void EditorContext::DuplicateSelection() noexcept { m_impl->duplicate_requested = true; }
+void EditorContext::PasteAt(const Vec2 position) noexcept {
+    if (Finite(position)) {
+        m_impl->paste_requested = position;
+        MarkExternalMutation(*m_impl);
+    }
+}
+
+void EditorContext::DuplicateSelection() noexcept {
+    m_impl->duplicate_requested = true;
+    MarkExternalMutation(*m_impl);
+}
 
 void EditorContext::AlignSelection(const NodeAlignment alignment) noexcept {
     m_impl->alignment_requested = alignment;
+    MarkExternalMutation(*m_impl);
 }
 
 void EditorContext::AutoLayoutSelection(LayoutOptions options) noexcept {
     m_impl->layout_requested = std::move(options);
+    MarkExternalMutation(*m_impl);
 }
 
 void EditorContext::FrameAll() noexcept {
     m_impl->frame_all = true;
+    MarkExternalMutation(*m_impl);
 }
 
 void EditorContext::FrameSelection() noexcept {
     m_impl->frame_selection = true;
+    MarkExternalMutation(*m_impl);
 }
 
 Result<void> EditorContext::TriggerLinkFlow(
@@ -130,6 +157,7 @@ Result<void> EditorContext::TriggerLinkFlow(
     } else {
         *existing = restarted;
     }
+    MarkExternalMutation(*m_impl);
     return {};
 }
 
@@ -141,18 +169,24 @@ void EditorContext::ClearLinkFlow(
     std::erase_if(m_impl->link_flows, [&](const auto& flow) {
         return flow.document_identity == identity && flow.graph == graph && flow.link == link;
     });
+    MarkExternalMutation(*m_impl);
 }
 
 void EditorContext::ClearLinkFlows() noexcept {
     m_impl->link_flows.clear();
+    MarkExternalMutation(*m_impl);
 }
 
 void EditorContext::InvalidateGeometry() noexcept {
     ++m_impl->manual_geometry_revision;
     m_impl->geometry.valid = false;
+    MarkExternalMutation(*m_impl);
 }
 
-void EditorContext::ResetMetrics() noexcept { m_impl->metrics = {}; }
+void EditorContext::ResetMetrics() noexcept {
+    m_impl->metrics = {};
+    MarkExternalMutation(*m_impl);
+}
 
 EditorMetrics EditorContext::Metrics() const noexcept { return m_impl->metrics; }
 

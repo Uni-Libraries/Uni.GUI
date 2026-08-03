@@ -73,7 +73,7 @@ bool EditorFrame::HitTest() {
         std::max(64.0f, style.pin_radius) * session.zoom + 10.0f) / session.zoom;
     const float conservative_hit_radius = std::max(
         maximum_pin_hit_radius,
-        std::max(config.link_hit_radius, style.handle_size) / session.zoom);
+        std::max(config.link_hit_radius, style.route_point_radius * 1.4f) / session.zoom);
     ++session.metrics.spatial_queries;
     const auto hit_entries = cache.spatial.Query(Detail::Expand(
         GraphRect{graph_mouse, graph_mouse}, conservative_hit_radius));
@@ -114,8 +114,8 @@ bool EditorFrame::HitTest() {
             const auto* creating = std::get_if<CreatingLink>(&session.interaction);
             const bool acquiring_link_target = creating != nullptr && creating->dragging;
             const float pin_hit_radius = std::max(
-                acquiring_link_target ? 18.0f : 9.0f,
-                radius * session.zoom + (acquiring_link_target ? 10.0f : 4.0f));
+                ScaleUi(acquiring_link_target ? 18.0f : 9.0f),
+                ScaleGraph(radius) + ScaleUi(acquiring_link_target ? 10.0f : 4.0f));
             if (!Overlaps(
                     pin_geometry.position - ImVec2{pin_hit_radius, pin_hit_radius},
                     pin_geometry.position + ImVec2{pin_hit_radius, pin_hit_radius},
@@ -138,7 +138,16 @@ bool EditorFrame::HitTest() {
             if (!hit_nodes.contains(node->id) && !Contains(node->min, node->max, mouse)) continue;
             if (Contains(node->min, node->max, mouse)) {
                 hovered_node = node->id;
-                hovered_node_collapse = Contains(node->collapse_min, node->collapse_max, mouse);
+                if (const auto range = header_item_ranges.find(node->id); range != header_item_ranges.end()) {
+                    for (std::size_t index = range->second.second; index > range->second.first; --index) {
+                        const auto& item_geometry = header_item_geometry[index - 1];
+                        if (Contains(item_geometry.min, item_geometry.max, mouse)) {
+                            hovered_header_item = index - 1;
+                            break;
+                        }
+                    }
+                }
+                hovered_node_collapse = config.enable_node_collapse && Contains(node->collapse_min, node->collapse_max, mouse);
                 hovered_node_resize = !resolved_nodes.at(node->id).collapsed &&
                     Contains(node->resize_min, node->resize_max, mouse);
                 break;
@@ -147,7 +156,7 @@ bool EditorFrame::HitTest() {
     }
 
     if (canvas_hovered && !hovered_pin && !hovered_node) {
-        const float radius = std::max(style.handle_size * 0.75f, 6.0f);
+        const float radius = ScaleUi(std::max(style.route_point_radius * 1.4f, 6.0f));
         for (auto point = route_point_geometry.rbegin(); point != route_point_geometry.rend(); ++point) {
             if (!hit_route_points.contains(point->point) &&
                 DistanceSquared(mouse, point->position) > radius * radius) continue;

@@ -66,6 +66,11 @@ constexpr std::size_t MaximumFlowMarkersPerLink = 4096;
 constexpr std::size_t FlattenedPointsPerMarker = 2;
 constexpr std::size_t MaximumFlowAdaptiveDepth = 12;
 
+[[nodiscard]] ImU32 WithAlpha(const ImU32 color, const float scale) noexcept {
+    const auto alpha = static_cast<ImU32>(static_cast<float>((color >> 24U) & 0xFFU) * scale);
+    return (color & 0x00FFFFFFU) | (alpha << 24U);
+}
+
 [[nodiscard]] Vec2 PrimitiveStart(const LinkPathPrimitive& primitive) noexcept {
     return std::visit(
         [](const auto& value) {
@@ -239,24 +244,159 @@ struct CubicHalves final {
 
 } // namespace
 
+NodeHeaderPresentation EditorFrame::ResolveNodeHeader(const NodeInstance& node) {
+    const auto* descriptor = ui.Find(node.type);
+    NodeHeaderPresentation resolved;
+    if (descriptor == nullptr || !descriptor->resolve_header) {
+        return resolved;
+    }
+
+    const ResolveNodeHeaderFn callback = descriptor->resolve_header;
+    const Revisions callback_revisions{document.ModelRevision(), presentation.PresentationRevision()};
+    const std::uint64_t document_identity = document.Identity();
+    const std::uint64_t presentation_identity = presentation.Identity();
+    const std::uint64_t document_allocation = document.AllocationEpoch();
+    const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
+    const std::uint64_t ui_identity = ui.Identity();
+    const std::uint64_t ui_revision = ui.Revision();
+    const std::uint64_t editor_revision = session.external_revision;
+    try {
+        resolved = callback(NodeHeaderContext{
+            .graph = graph_id,
+            .graph_data = *graph,
+            .node = node,
+            .collapsed = session.geometry.resolved_nodes.at(node.id).collapsed,
+            .selected = session.selected_nodes.contains(node.id),
+            .ui_scale = ui_scale,
+            .zoom = session.zoom,
+        });
+    } catch (const std::exception& exception) {
+        ui_callback_invalidated = true;
+        session.last_error = std::string{"Node header callback failed: "} + exception.what();
+    } catch (...) {
+        ui_callback_invalidated = true;
+        session.last_error = "Node header callback failed with an unknown exception";
+    }
+    if (callback_revisions != Revisions{document.ModelRevision(), presentation.PresentationRevision()} ||
+        document_identity != document.Identity() || presentation_identity != presentation.Identity() ||
+        document_allocation != document.AllocationEpoch() || presentation_allocation != presentation.AllocationEpoch() ||
+        ui_identity != ui.Identity() || ui_revision != ui.Revision() ||
+        editor_revision != session.external_revision) {
+        ui_callback_invalidated = true;
+        session.last_error = "Node header callbacks must not mutate editor state or their registry";
+    }
+    return ui_callback_invalidated ? NodeHeaderPresentation{} : resolved;
+}
+
+bool EditorFrame::PrepareNodeHeaders() {
+    node_headers.clear();
+    header_item_geometry.clear();
+    header_item_ranges.clear();
+    hovered_header_item.reset();
+    constexpr std::size_t MaximumHeaderItems = 64;
+    for (const auto& geometry : node_geometry) {
+        const auto& node = graph->nodes.at(geometry.id);
+        NodeHeaderPresentation header = ResolveNodeHeader(node);
+        if (ui_callback_invalidated) return false;
+        if (header.lines.empty()) {
+            if (!node.display_name.empty()) {
+                header.lines.push_back(node.display_name);
+            } else if (const auto semantic = registry.Find(node.type);
+                       semantic && !semantic->display_name.empty()) {
+                header.lines.push_back(semantic->display_name);
+            } else {
+                header.lines.push_back(node.type.Value());
+            }
+        }
+        if (header.lines.size() > config.node_header.maximum_text_lines) {
+            header.lines.resize(config.node_header.maximum_text_lines);
+        }
+        if (header.items.size() > MaximumHeaderItems) {
+            session.last_error = "Node header contains too many items";
+            ui_callback_invalidated = true;
+            return false;
+        }
+        std::unordered_set<std::string> item_ids;
+        for (const auto& item : header.items) {
+            const auto* glyph = std::get_if<NodeHeaderGlyph>(&item.content);
+            const auto* badge = std::get_if<NodeHeaderBadge>(&item.content);
+            if (item.id.empty() || !item_ids.insert(item.id).second ||
+                (glyph != nullptr && ui.FindHeaderGlyph(glyph->id) == nullptr) ||
+                (badge != nullptr && badge->text.empty())) {
+                session.last_error = "Node header contains an invalid or duplicate item";
+                ui_callback_invalidated = true;
+                return false;
+            }
+        }
+
+        const auto [stored, inserted] = node_headers.emplace(geometry.id, std::move(header));
+        (void)inserted;
+        const auto& items = stored->second.items;
+        const std::size_t item_range_begin = header_item_geometry.size();
+        float right = geometry.max.x - ScaleGraph(config.node_header.horizontal_padding);
+        if (config.enable_node_collapse) {
+            right = geometry.collapse_min.x - ScaleGraph(config.node_header.item_spacing);
+        }
+        const float text_limit = geometry.min.x +
+            ScaleGraph(config.node_header.horizontal_padding + config.node_header.minimum_text_width);
+        const float item_height_screen = ScaleGraph(config.node_header.item_height);
+        const float center_y = (geometry.min.y + geometry.title_max.y) * 0.5f;
+        for (std::size_t reverse = items.size(); reverse > 0; --reverse) {
+            const std::size_t index = reverse - 1;
+            const auto& item = items[index];
+            float width = item_height_screen;
+            if (const auto* glyph = std::get_if<NodeHeaderGlyph>(&item.content)) {
+                width *= ui.FindHeaderGlyph(glyph->id)->aspect_ratio;
+            } else if (const auto* badge = std::get_if<NodeHeaderBadge>(&item.content)) {
+                const ImVec2 text = ImGui::CalcTextSize(badge->text.c_str()) * (0.75f * session.zoom);
+                width = text.x + ScaleGraph(8.0f);
+            }
+            const float left = right - width;
+            if (left < text_limit) break;
+            header_item_geometry.push_back({
+                .node = geometry.id,
+                .item_index = index,
+                .min = {left, center_y - item_height_screen * 0.5f},
+                .max = {right, center_y + item_height_screen * 0.5f},
+            });
+            right = left - ScaleGraph(config.node_header.item_spacing);
+        }
+        header_item_ranges.emplace(
+            geometry.id,
+            std::pair{item_range_begin, header_item_geometry.size()});
+    }
+    return true;
+}
+
 void EditorFrame::RegisterTestItems() {
 #if defined(IMGUI_ENABLE_TEST_ENGINE)
     const auto& resolved_nodes = session.geometry.resolved_nodes;
     for (const auto& geometry : node_geometry) {
-        const float right = std::max(geometry.min.x + 20.0f, geometry.collapse_min.x - 4.0f);
+        const float right = config.enable_node_collapse ? std::max(geometry.min.x + 20.0f, geometry.collapse_min.x - 4.0f)
+                                                        : geometry.max.x - 4.0f;
         AddTestEngineItem(TestEngineLabel("Node", geometry.id.Value()), geometry.min + ImVec2{6.0f, 2.0f},
                           {right, geometry.title_max.y - 2.0f});
-        AddTestEngineItem(TestEngineLabel("Node", geometry.id.Value(), "collapse"), geometry.collapse_min,
-                          geometry.collapse_max);
+        if (config.enable_node_collapse) {
+            AddTestEngineItem(TestEngineLabel("Node", geometry.id.Value(), "collapse"), geometry.collapse_min,
+                              geometry.collapse_max);
+        }
         if (!resolved_nodes.at(geometry.id).collapsed) {
             AddTestEngineItem(TestEngineLabel("Node", geometry.id.Value(), "resize"), geometry.resize_min,
                               geometry.resize_max);
         }
         for (const auto& pin : geometry.pins) {
-            constexpr float PinTestRadius = 12.0f;
+            const float PinTestRadius = ScaleUi(12.0f);
             AddTestEngineItem(TestEngineLabel("Pin", pin.id.Value()),
                               pin.position - ImVec2{PinTestRadius, PinTestRadius},
                               pin.position + ImVec2{PinTestRadius, PinTestRadius});
+        }
+    }
+    for (const auto& geometry : header_item_geometry) {
+        const auto header = node_headers.find(geometry.node);
+        if (header == node_headers.end() || geometry.item_index >= header->second.items.size()) continue;
+        const auto& item = header->second.items[geometry.item_index];
+        if (!item.action.empty()) {
+            AddTestEngineItem(TestEngineLabel("Node", geometry.node.Value(), item.id), geometry.min, geometry.max);
         }
     }
     for (const auto& geometry : group_geometry) {
@@ -272,14 +412,14 @@ void EditorFrame::RegisterTestItems() {
     }
     for (const LinkId link : visible_links) {
         if (const LinkPath* path = LinkPathFor(link); path != nullptr && !path->segments.empty()) {
-            constexpr float LinkTestRadius = 7.0f;
+            const float LinkTestRadius = ScaleUi(7.0f);
             const ImVec2 position = ToScreen(TestEngineLinkPoint(*path));
             AddTestEngineItem(TestEngineLabel("Link", link.Value()), position - ImVec2{LinkTestRadius, LinkTestRadius},
                               position + ImVec2{LinkTestRadius, LinkTestRadius});
         }
     }
     for (const auto& point : route_point_geometry) {
-        constexpr float RoutePointTestRadius = 8.0f;
+        const float RoutePointTestRadius = ScaleUi(8.0f);
         AddTestEngineItem(TestEngineLabel("Route point", point.point.Value()),
                           point.position - ImVec2{RoutePointTestRadius, RoutePointTestRadius},
                           point.position + ImVec2{RoutePointTestRadius, RoutePointTestRadius});
@@ -308,7 +448,7 @@ void EditorFrame::RenderLinkFlows() {
             spacing = flattened.length / static_cast<float>(marker_limit - 1);
         }
         const float phase = std::fmod(flow.elapsed * config.link_flow_speed / session.zoom, spacing);
-        const float radius = style.link_flow_marker_radius;
+        const float radius = ScaleUi(style.link_flow_marker_radius);
         std::size_t marker_count = 0;
         for (float forward_distance = phase; forward_distance <= flattened.length && marker_count < marker_limit;
              forward_distance += spacing, ++marker_count) {
@@ -321,8 +461,8 @@ void EditorFrame::RenderLinkFlows() {
                 continue;
             }
             if (style.link_flow_outline_width > 0.0f) {
-                draw_list->AddCircleFilled(position, radius + style.link_flow_outline_width, style.link_flow_outline,
-                                           12);
+                draw_list->AddCircleFilled(position, radius + ScaleUi(style.link_flow_outline_width),
+                                           style.link_flow_outline, 12);
             }
             draw_list->AddCircleFilled(position, radius, style.link_flow, 12);
         }
@@ -341,16 +481,16 @@ bool EditorFrame::RenderScene() {
 
     splitter.SetCurrentChannel(draw_list, 0);
     if (config.show_grid) {
-        const float spacing = std::max(config.grid_size * session.zoom, 8.0f);
-        const float start_x = canvas_origin.x + std::fmod(session.pan.x, spacing);
-        const float start_y = canvas_origin.y + std::fmod(session.pan.y, spacing);
+        const float spacing = std::max(ScaleGraph(config.grid_size), ScaleUi(8.0f));
+        const float start_x = canvas_origin.x + std::fmod(ScaleUi(session.pan.x), spacing);
+        const float start_y = canvas_origin.y + std::fmod(ScaleUi(session.pan.y), spacing);
         for (float x = start_x; x < canvas_max.x; x += spacing) {
-            const float line = std::floor((x - canvas_origin.x - session.pan.x) / spacing);
+            const float line = std::floor((x - canvas_origin.x - ScaleUi(session.pan.x)) / spacing);
             const ImU32 color = std::fmod(std::abs(line), 4.0f) < 0.5f ? style.grid_major : style.grid_minor;
             draw_list->AddLine({x, canvas_origin.y}, {x, canvas_max.y}, color);
         }
         for (float y = start_y; y < canvas_max.y; y += spacing) {
-            const float line = std::floor((y - canvas_origin.y - session.pan.y) / spacing);
+            const float line = std::floor((y - canvas_origin.y - ScaleUi(session.pan.y)) / spacing);
             const ImU32 color = std::fmod(std::abs(line), 4.0f) < 0.5f ? style.grid_major : style.grid_minor;
             draw_list->AddLine({canvas_origin.x, y}, {canvas_max.x, y}, color);
         }
@@ -363,27 +503,28 @@ bool EditorFrame::RenderScene() {
         const auto& group_geometry = group.geometry;
         if (!Overlaps(geometry.min, geometry.max, canvas_origin, canvas_max)) continue;
         const ImU32 fill = group_style.kind == GroupKind::Comment ? style.comment : group_style.color;
-        draw_list->AddRectFilled(geometry.min, geometry.max, fill, style.node_rounding * session.zoom);
+        draw_list->AddRectFilled(geometry.min, geometry.max, fill, ScaleGraph(style.node_rounding));
         draw_list->AddRect(geometry.min, geometry.max,
                            membership_drop_group == group.id
                                ? style.compatible
                                : (session.selected_groups.contains(group.id) ? style.selection : style.group_border),
-                           style.node_rounding * session.zoom, 0,
-                           membership_drop_group == group.id || session.selected_groups.contains(group.id) ? 3.0f
-                                                                                                           : 1.5f);
+                            ScaleGraph(style.node_rounding), 0,
+                            ScaleUi(membership_drop_group == group.id || session.selected_groups.contains(group.id)
+                                        ? 3.0f
+                                        : 1.5f));
         if (!group_style.title.empty()) {
             draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * session.zoom,
-                               geometry.min + ImVec2{8.0f * session.zoom, 6.0f * session.zoom}, style.text,
+                               geometry.min + ImVec2{ScaleGraph(8.0f), ScaleGraph(6.0f)}, style.text,
                                group_style.title.c_str());
         }
         if (group_style.kind == GroupKind::Comment && !group_geometry.collapsed &&
             !group_style.body.empty() && session.zoom >= 0.5f) {
             draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * session.zoom,
-                               geometry.min + ImVec2{8.0f * session.zoom, 36.0f * session.zoom}, style.text,
+                               geometry.min + ImVec2{ScaleGraph(8.0f), ScaleGraph(36.0f)}, style.text,
                                group_style.body.c_str());
         }
         const ImVec2 collapse_center = (geometry.collapse_min + geometry.collapse_max) * 0.5f;
-        const float collapse_radius = 4.0f * session.zoom;
+        const float collapse_radius = ScaleGraph(4.0f);
         if (group_geometry.collapsed) {
             draw_list->AddTriangleFilled(collapse_center + ImVec2{-collapse_radius, -collapse_radius},
                                          collapse_center + ImVec2{-collapse_radius, collapse_radius},
@@ -409,8 +550,8 @@ bool EditorFrame::RenderScene() {
             link_style != presentation.Links().end() && link_style->second.Style().color) {
             color = *link_style->second.Style().color;
         }
-        const float width = style.link_width + (session.selected_links.contains(link_id) ? 2.0f : 0.0f);
-        const GraphRect stroke_viewport = Detail::Expand(viewport_bounds, (width * 0.5f + 2.0f) / session.zoom);
+        const float width = ScaleUi(style.link_width + (session.selected_links.contains(link_id) ? 2.0f : 0.0f));
+        const GraphRect stroke_viewport = Detail::Expand(viewport_bounds, (width * 0.5f + ScaleUi(2.0f)) / GraphScale());
         for (const auto& segment : path->segments) {
             if (!Detail::Overlaps(Detail::PrimitiveBounds(segment), stroke_viewport)) continue;
             std::visit(
@@ -444,46 +585,130 @@ bool EditorFrame::RenderScene() {
         const ImU32 node_color =
             current_presentation != nullptr ? current_presentation->color.value_or(style.node) : style.node;
         ImU32 header_color = style.node_header;
-        if (const auto* descriptor = ui.Find(node.type)) header_color = descriptor->header_color;
-        if (node.role == NodeRole::BoundaryInput || node.role == NodeRole::BoundaryOutput) {
-            header_color = 0xFF5E4630U;
-        } else if (node.role == NodeRole::IntergraphInput || node.role == NodeRole::IntergraphOutput) {
-            header_color = 0xFF5B365EU;
+        if (const auto* descriptor = ui.Find(node.type); descriptor != nullptr && descriptor->header_color) {
+            header_color = *descriptor->header_color;
         }
-        const float rounding = style.node_rounding * session.zoom;
+        const auto header = node_headers.find(node.id);
+        if (header != node_headers.end() && header->second.color) {
+            header_color = *header->second.color;
+        }
+        const float rounding = ScaleGraph(style.node_rounding);
         draw_list->AddRectFilled(geometry.min, geometry.max, node_color, rounding);
         draw_list->AddRectFilled(geometry.min, geometry.title_max, header_color, rounding, ImDrawFlags_RoundCornersTop);
         const ImU32 border = session.selected_nodes.contains(geometry.id) ? style.selection : style.node_border;
-        const float border_width =
-            session.selected_nodes.contains(geometry.id) ? style.node_border_width + 1.5f : style.node_border_width;
+        const float border_width = ScaleUi(
+            session.selected_nodes.contains(geometry.id) ? style.node_border_width + 1.5f : style.node_border_width);
         draw_list->AddRect(geometry.min, geometry.max, border, rounding, 0, border_width);
-        const std::string_view title = node.display_name.empty() ? node.type.Value() : node.display_name;
+        const NodeHeaderPresentation& resolved_header = header->second;
         if (session.zoom >= 0.4f) {
-            draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * session.zoom,
-                               geometry.min + ImVec2{10.0f * session.zoom, 6.0f * session.zoom}, style.text,
-                               title.data(), title.data() + title.size());
+            const float text_left = geometry.min.x + ScaleGraph(config.node_header.horizontal_padding);
+            float content_right = geometry.max.x - ScaleGraph(config.node_header.horizontal_padding);
+            if (config.enable_node_collapse)
+                content_right = geometry.collapse_min.x - ScaleGraph(config.node_header.item_spacing);
+            const auto item_range = header_item_ranges.find(node.id);
+            if (item_range != header_item_ranges.end()) {
+                for (std::size_t index = item_range->second.first; index < item_range->second.second; ++index) {
+                    content_right = std::min(content_right,
+                        header_item_geometry[index].min.x - ScaleGraph(config.node_header.item_spacing));
+                }
+            }
+            content_right = std::max(content_right, text_left + GraphScale());
+            const ImVec4 clip_rect{text_left, geometry.min.y, content_right, geometry.title_max.y};
+            const std::string& primary = resolved_header.lines.front();
+            draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * config.node_header.primary_text_scale * session.zoom,
+                               {text_left, geometry.min.y + ScaleGraph(config.node_header.vertical_padding)}, style.text,
+                               primary.data(), primary.data() + primary.size(), 0.0F, &clip_rect);
+            if (resolved_header.lines.size() > 1 && !resolved_header.lines[1].empty()) {
+                const std::string& secondary = resolved_header.lines[1];
+                const float secondary_y = geometry.min.y + ScaleGraph(
+                    config.node_header.vertical_padding +
+                    ImGui::GetFontSize() / ui_scale * config.node_header.primary_text_scale +
+                    config.node_header.line_spacing);
+                draw_list->AddText(ImGui::GetFont(),
+                                   ImGui::GetFontSize() * config.node_header.secondary_text_scale * session.zoom,
+                                   {text_left, secondary_y}, WithAlpha(style.text, 0.68F),
+                                   secondary.data(), secondary.data() + secondary.size(), 0.0F, &clip_rect);
+            }
         }
+        const auto item_range = header_item_ranges.find(node.id);
+        if (item_range != header_item_ranges.end()) {
+            for (std::size_t geometry_index = item_range->second.first;
+                 geometry_index < item_range->second.second;
+                 ++geometry_index) {
+                const auto& item_geometry = header_item_geometry[geometry_index];
+                const auto& item = resolved_header.items[item_geometry.item_index];
+                const ImU32 item_color = item.enabled
+                    ? item.color.value_or(style.text)
+                    : WithAlpha(item.color.value_or(style.text), 0.35f);
+                if (item.active) {
+                    draw_list->AddRectFilled(item_geometry.min, item_geometry.max, WithAlpha(item_color, 0.18f),
+                                             ScaleGraph(3.0f));
+                }
+                if (const auto* glyph = std::get_if<NodeHeaderGlyph>(&item.content)) {
+                const auto* glyph_descriptor = ui.FindHeaderGlyph(glyph->id);
+                if (glyph_descriptor == nullptr) {
+                    ui_callback_invalidated = true;
+                    session.last_error = "Node header glyph was unregistered during rendering";
+                    break;
+                }
+                const DrawNodeHeaderGlyphFn glyph_callback = glyph_descriptor->draw;
+                const Revisions callback_revisions{document.ModelRevision(), presentation.PresentationRevision()};
+                const std::uint64_t document_identity = document.Identity();
+                const std::uint64_t presentation_identity = presentation.Identity();
+                const std::uint64_t document_allocation = document.AllocationEpoch();
+                const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
+                const std::uint64_t ui_identity = ui.Identity();
+                const std::uint64_t ui_revision = ui.Revision();
+                const std::uint64_t editor_revision = session.external_revision;
+                try {
+                    glyph_callback(NodeHeaderGlyphDrawContext{
+                        .draw_list = *draw_list,
+                        .min = {item_geometry.min.x, item_geometry.min.y},
+                        .max = {item_geometry.max.x, item_geometry.max.y},
+                        .color = item_color,
+                        .active = item.active,
+                        .enabled = item.enabled,
+                    });
+                } catch (const std::exception& exception) {
+                    ui_callback_invalidated = true;
+                    session.last_error = std::string{"Node header glyph callback failed: "} + exception.what();
+                } catch (...) {
+                    ui_callback_invalidated = true;
+                    session.last_error = "Node header glyph callback failed with an unknown exception";
+                }
+                if (callback_revisions != Revisions{document.ModelRevision(), presentation.PresentationRevision()} ||
+                    document_identity != document.Identity() || presentation_identity != presentation.Identity() ||
+                    document_allocation != document.AllocationEpoch() ||
+                    presentation_allocation != presentation.AllocationEpoch() ||
+                    ui_identity != ui.Identity() || ui_revision != ui.Revision() ||
+                    editor_revision != session.external_revision) {
+                    ui_callback_invalidated = true;
+                    session.last_error = "Node header glyph callbacks must not mutate editor state or its registries";
+                }
+                if (ui_callback_invalidated) break;
+                } else if (const auto* badge = std::get_if<NodeHeaderBadge>(&item.content)) {
+                    const ImVec2 text_size = ImGui::CalcTextSize(badge->text.c_str()) * (0.75f * session.zoom);
+                    const ImVec2 text_position = (item_geometry.min + item_geometry.max - text_size) * 0.5f;
+                    draw_list->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 0.75f * session.zoom,
+                                       text_position, item_color, badge->text.c_str());
+                }
+            }
+        }
+        if (ui_callback_invalidated) break;
         const ImVec2 collapse_center = (geometry.collapse_min + geometry.collapse_max) * 0.5f;
-        if (node.subgraph && session.zoom >= 0.5f) {
-            const bool asset = std::holds_alternative<GraphAssetTarget>(node.subgraph->target);
-            const char* badge = asset                                                  ? "ASSET"
-                                : node.subgraph->ownership == SubgraphOwnership::Owned ? "OWNED"
-                                                                                       : "REF";
-            const ImVec2 badge_size = ImGui::CalcTextSize(badge) * session.zoom;
-            draw_list->AddText(
-                ImGui::GetFont(), ImGui::GetFontSize() * session.zoom,
-                {geometry.collapse_min.x - badge_size.x - 8.0f * session.zoom, geometry.min.y + 6.0f * session.zoom},
-                style.text, badge);
+        const float collapse_radius = ScaleGraph(4.0f);
+        if (config.enable_node_collapse) {
+            if (node_presentation.collapsed) {
+                draw_list->AddTriangleFilled(collapse_center + ImVec2{-collapse_radius, -collapse_radius},
+                                             collapse_center + ImVec2{-collapse_radius, collapse_radius},
+                                             collapse_center + ImVec2{collapse_radius, 0.0f}, style.text);
+            } else {
+                draw_list->AddTriangleFilled(collapse_center + ImVec2{-collapse_radius, -collapse_radius},
+                                             collapse_center + ImVec2{collapse_radius, -collapse_radius},
+                                             collapse_center + ImVec2{0.0f, collapse_radius}, style.text);
+            }
         }
-        const float collapse_radius = 4.0f * session.zoom;
-        if (node_presentation.collapsed) {
-            draw_list->AddTriangleFilled(collapse_center + ImVec2{-collapse_radius, -collapse_radius},
-                                         collapse_center + ImVec2{-collapse_radius, collapse_radius},
-                                         collapse_center + ImVec2{collapse_radius, 0.0f}, style.text);
-        } else {
-            draw_list->AddTriangleFilled(collapse_center + ImVec2{-collapse_radius, -collapse_radius},
-                                         collapse_center + ImVec2{collapse_radius, -collapse_radius},
-                                         collapse_center + ImVec2{0.0f, collapse_radius}, style.text);
+        if (!node_presentation.collapsed) {
             draw_list->AddTriangleFilled(geometry.resize_max, {geometry.resize_min.x, geometry.resize_max.y},
                                          {geometry.resize_max.x, geometry.resize_min.y}, style.node_border);
         }
@@ -497,7 +722,7 @@ bool EditorFrame::RenderScene() {
                 custom_style.radius && std::isfinite(*custom_style.radius) && *custom_style.radius > 0.0f
                     ? *custom_style.radius
                     : style.pin_radius;
-            const float radius = logical_radius * session.zoom;
+            const float radius = ScaleGraph(logical_radius);
             const ImU32 color = custom_style.color.value_or(style.pin);
             const PinShape shape =
                 custom_style.shape.value_or(pin.kind == PinKind::Execution ? PinShape::Square : PinShape::Circle);
@@ -520,7 +745,7 @@ bool EditorFrame::RenderScene() {
                 const ImVec2 text_size = unscaled_text_size * session.zoom;
                 const ImVec2 text_position =
                     pin_geometry.position +
-                    ImVec2{pin_geometry.label.offset.x, pin_geometry.label.offset.y} * session.zoom -
+                    ImVec2{pin_geometry.label.offset.x, pin_geometry.label.offset.y} * GraphScale() -
                     ImVec2{
                         text_size.x * pin_geometry.label.pivot.x,
                         text_size.y * pin_geometry.label.pivot.y,
@@ -560,10 +785,11 @@ bool EditorFrame::RenderScene() {
                 graph_id,
                 document,
                 node,
+                ui_scale,
                 session.zoom,
                 {
-                    (geometry.body_max.x - geometry.body_min.x) / session.zoom,
-                    (geometry.body_max.y - geometry.body_min.y) / session.zoom,
+                    (geometry.body_max.x - geometry.body_min.x) / GraphScale(),
+                    (geometry.body_max.y - geometry.body_min.y) / GraphScale(),
                 },
                 [&](std::unique_ptr<Command> command) { pending_commands.push_back(std::move(command)); },
                 [&] { return document.AllocatePinId(); },
@@ -629,20 +855,21 @@ void EditorFrame::RenderCanvasControls() {
     ImGui::Dummy({0.0f, 0.0f});
 
 #if defined(IMGUI_ENABLE_TEST_ENGINE)
-    const ImVec2 canvas_test_min = canvas_origin + ImVec2{12.0f, canvas_size.y - 30.0f};
-    AddTestEngineItem("Canvas", canvas_test_min, canvas_test_min + ImVec2{24.0f, 18.0f});
+    const ImVec2 canvas_test_min = canvas_origin + ImVec2{ScaleUi(12.0f), canvas_size.y - ScaleUi(30.0f)};
+    AddTestEngineItem("Canvas", canvas_test_min,
+                      canvas_test_min + ImVec2{ScaleUi(24.0f), ScaleUi(18.0f)});
 #endif
 
     if (!config.show_breadcrumbs) return;
     const ImVec2 saved_cursor = ImGui::GetCursorScreenPos();
-    ImGui::SetCursorScreenPos(canvas_origin + ImVec2{8.0f, 8.0f});
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+    ImGui::SetCursorScreenPos(canvas_origin + ImVec2{ScaleUi(8.0f), ScaleUi(8.0f)});
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ScaleUi(4.0f));
     const auto breadcrumbs = context.Breadcrumbs();
     for (std::size_t index = 0; index < breadcrumbs.size(); ++index) {
         if (index != 0) {
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, ScaleUi(4.0f));
             ImGui::TextUnformatted(">");
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, ScaleUi(4.0f));
         }
         if (index + 1 == breadcrumbs.size()) {
             ImGui::TextUnformatted(breadcrumbs[index].label.c_str());

@@ -31,19 +31,30 @@ EditorFrame::EditorFrame(
       config(config),
       callbacks(callbacks),
       policy(policy),
-      session(Detail::EditorAccess::Session(context)) {}
+      session(Detail::EditorAccess::Session(context)) {
+    if (!session.draw_active) {
+        session.draw_active = true;
+        owns_draw_lease = true;
+    }
+}
 
 EditorFrame::~EditorFrame() {
     CloseCanvas();
+    if (owns_draw_lease) session.draw_active = false;
 }
 
 EditorResult EditorFrame::Draw() {
+    if (!owns_draw_lease) {
+        session.last_error = "DrawEditor is not reentrant for one EditorContext";
+        return result;
+    }
     if (!Initialize() || !BeginCanvas()) return result;
 
     UpdateInteraction();
     if (!EnsureGeometryCache()) return result;
     if (!BuildTransientGeometry()) return result;
     if (!ApplyViewportNavigation()) return result;
+    if (!PrepareNodeHeaders()) return result;
     RegisterTestItems();
     if (!HitTest()) return result;
     if (!RenderScene()) return result;
@@ -51,7 +62,9 @@ EditorResult EditorFrame::Draw() {
     PrepareMinimap();
     ProcessGestures();
     ProcessClipboardRequests();
+    if (context_state_invalidated) return result;
     ProcessShortcuts();
+    if (context_state_invalidated) return result;
     if (!RenderOverlays()) return result;
     RenderMinimap();
     EndRendering();
@@ -94,6 +107,14 @@ bool EditorFrame::Initialize() {
         ImGui::TextUnformatted(session.last_error.c_str());
         return false;
     }
+    ui_scale = ImGui::GetStyle().FontScaleMain * ImGui::GetStyle().FontScaleDpi;
+    if (!std::isfinite(ui_scale) || ui_scale <= 0.0f || ui_scale >= 99.0f) {
+        session.last_error = "Node editor could not resolve a valid UI scale";
+        ImGui::TextUnformatted(session.last_error.c_str());
+        return false;
+    }
+    const float reference_font_size = ImGui::GetFontSize() / ui_scale;
+    header_height = Detail::MeasureNodeHeaderHeight(reference_font_size, config.node_header);
     UpdateLinkFlows();
 
     if (session.active_graph != graph_id) {
@@ -142,8 +163,8 @@ bool EditorFrame::BeginCanvas() {
     ImGui::PushID(&context);
     ImGui::PushStyleColor(ImGuiCol_ChildBg, style.background);
     const ImVec2 child_size{
-        requested_size.x > 0.0f ? requested_size.x : 0.0f,
-        requested_size.y > 0.0f ? requested_size.y : 0.0f,
+        requested_size.x > 0.0f ? requested_size.x * ui_scale : 0.0f,
+        requested_size.y > 0.0f ? requested_size.y * ui_scale : 0.0f,
     };
     const bool visible = ImGui::BeginChild(
         "##node_editor",
@@ -367,16 +388,42 @@ void EditorFrame::ApplyNavigation() {
 }
 
 ImVec2 EditorFrame::ToScreen(const Vec2 position) const noexcept {
-    return {
-        canvas_origin.x + session.pan.x + position.x * session.zoom,
-        canvas_origin.y + session.pan.y + position.y * session.zoom,
-    };
+    const Vec2 screen = Detail::EditorViewTransform{
+        .canvas_origin = {canvas_origin.x, canvas_origin.y},
+        .pan = session.pan,
+        .ui_scale = ui_scale,
+        .zoom = session.zoom,
+    }.ToScreen(position);
+    return {screen.x, screen.y};
 }
 
 Vec2 EditorFrame::ToGraph(const ImVec2 position) const noexcept {
+    return Detail::EditorViewTransform{
+        .canvas_origin = {canvas_origin.x, canvas_origin.y},
+        .pan = session.pan,
+        .ui_scale = ui_scale,
+        .zoom = session.zoom,
+    }.ToGraph({position.x, position.y});
+}
+
+float EditorFrame::UiScale() const noexcept { return ui_scale; }
+float EditorFrame::GraphScale() const noexcept {
+    return Detail::EditorViewTransform{.ui_scale = ui_scale, .zoom = session.zoom}.GraphScale();
+}
+float EditorFrame::ScaleUi(const float value) const noexcept { return value * ui_scale; }
+float EditorFrame::ScaleGraph(const float value) const noexcept { return value * GraphScale(); }
+
+Vec2 EditorFrame::TextSizeInGraph(const std::string_view text) const {
+    const ImVec2 measured = ImGui::CalcTextSize(text.data(), text.data() + text.size());
+    return {measured.x / ui_scale, measured.y / ui_scale};
+}
+
+Vec2 EditorFrame::MinimumNodeSize() const noexcept {
     return {
-        (position.x - canvas_origin.x - session.pan.x) / session.zoom,
-        (position.y - canvas_origin.y - session.pan.y) / session.zoom,
+        std::max(config.minimum_node_size.x,
+                 config.node_header.collapse_width + config.node_header.horizontal_padding * 2.0f +
+                     config.node_header.minimum_text_width),
+        std::max(config.minimum_node_size.y, header_height),
     };
 }
 

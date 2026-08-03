@@ -52,6 +52,13 @@ struct RoutePointGeometry final {
     ImVec2 position;
 };
 
+struct HeaderItemGeometry final {
+    NodeId node;
+    std::size_t item_index{0};
+    ImVec2 min;
+    ImVec2 max;
+};
+
 [[nodiscard]] bool Contains(ImVec2 min, ImVec2 max, ImVec2 point) noexcept;
 [[nodiscard]] bool Overlaps(ImVec2 first_min, ImVec2 first_max, ImVec2 second_min, ImVec2 second_max) noexcept;
 [[nodiscard]] ImVec2 Min(ImVec2 first, ImVec2 second) noexcept;
@@ -116,6 +123,7 @@ private:
     void UpdateInteraction();
     [[nodiscard]] bool EnsureGeometryCache();
     [[nodiscard]] bool BuildTransientGeometry();
+    [[nodiscard]] bool PrepareNodeHeaders();
     [[nodiscard]] bool ApplyViewportNavigation();
     [[nodiscard]] Result<LinkPath> InvokeRouter(
         const LinkRouterDescriptor& descriptor,
@@ -132,6 +140,7 @@ private:
     [[nodiscard]] const LinkPath* LinkPathFor(LinkId link) const;
 
     void RegisterTestItems();
+    [[nodiscard]] NodeHeaderPresentation ResolveNodeHeader(const NodeInstance& node);
     [[nodiscard]] PinStyle ResolvePinStyle(const PinInstance& pin, bool hovered);
     [[nodiscard]] bool HitTest();
     [[nodiscard]] bool PointerOverUiBody() const;
@@ -164,6 +173,12 @@ private:
 
     [[nodiscard]] ImVec2 ToScreen(Vec2 position) const noexcept;
     [[nodiscard]] Vec2 ToGraph(ImVec2 position) const noexcept;
+    [[nodiscard]] float UiScale() const noexcept;
+    [[nodiscard]] float GraphScale() const noexcept;
+    [[nodiscard]] float ScaleUi(float value) const noexcept;
+    [[nodiscard]] float ScaleGraph(float value) const noexcept;
+    [[nodiscard]] Vec2 TextSizeInGraph(std::string_view text) const;
+    [[nodiscard]] Vec2 MinimumNodeSize() const noexcept;
 
     EditorContext& context;
     GraphDocument& document;
@@ -192,12 +207,17 @@ private:
     ImVec2 canvas_max;
     ImVec2 mouse;
     bool canvas_hovered{false};
+    float ui_scale{1.0f};
+    float header_height{28.0f};
 
     NodeId resized_layout_node;
     std::optional<NodeUiLayout> resized_layout;
     std::vector<NodeGeometry> node_geometry;
     std::vector<GroupGeometry> group_geometry;
     std::vector<RoutePointGeometry> route_point_geometry;
+    std::unordered_map<NodeId, NodeHeaderPresentation, IdHash> node_headers;
+    std::vector<HeaderItemGeometry> header_item_geometry;
+    std::unordered_map<NodeId, std::pair<std::size_t, std::size_t>, IdHash> header_item_ranges;
     std::unordered_map<PinId, ImVec2, IdHash> pin_positions;
     std::unordered_set<LinkId, IdHash> visible_links;
     std::unordered_map<LinkId, LinkPath, IdHash> overridden_link_paths;
@@ -212,6 +232,7 @@ private:
 
     PinId hovered_pin;
     NodeId hovered_node;
+    std::optional<std::size_t> hovered_header_item;
     bool hovered_node_collapse{false};
     bool hovered_node_resize{false};
     RoutePointId hovered_route_point;
@@ -229,6 +250,7 @@ private:
     bool append_selection{false};
     bool open_create_popup{false};
     bool context_state_invalidated{false};
+    bool owns_draw_lease{false};
 
     ImDrawList* draw_list{nullptr};
     ImDrawListSplitter splitter;

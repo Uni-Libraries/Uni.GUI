@@ -150,11 +150,67 @@ void TestBuiltInAndCustomRouters() {
         "Custom router removal must update registry revision");
 }
 
+void TestEditorViewScaling() {
+    for (const float ui_scale : {1.0f, 1.25f, 2.0f}) {
+        for (const float zoom : {0.5f, 1.0f, 2.0f}) {
+            const EditorViewTransform transform{
+                .canvas_origin = {17.0f, 23.0f},
+                .pan = {31.0f, -19.0f},
+                .ui_scale = ui_scale,
+                .zoom = zoom,
+            };
+            const Vec2 graph{143.0f, -57.0f};
+            const Vec2 screen = transform.ToScreen(graph);
+            const Vec2 restored = transform.ToGraph(screen);
+            Expect(std::abs(restored.x - graph.x) < 0.001f &&
+                       std::abs(restored.y - graph.y) < 0.001f,
+                   "Graph and screen transforms must round-trip at every UI scale and zoom");
+            Expect(std::abs(transform.GraphScale() - ui_scale * zoom) < 0.001f,
+                   "Graph geometry must compose UI scale and editor zoom exactly once");
+        }
+    }
+
+    const EditorViewTransform first{
+        .canvas_origin = {10.0f, 20.0f},
+        .pan = {40.0f, -25.0f},
+        .ui_scale = 1.0f,
+        .zoom = 1.5f,
+    };
+    const EditorViewTransform second{
+        .canvas_origin = first.canvas_origin,
+        .pan = first.pan,
+        .ui_scale = 2.0f,
+        .zoom = first.zoom,
+    };
+    const Vec2 graph{80.0f, 60.0f};
+    const Vec2 first_offset = first.ToScreen(graph) - first.canvas_origin;
+    const Vec2 second_offset = second.ToScreen(graph) - second.canvas_origin;
+    Expect(std::abs(second_offset.x - first_offset.x * 2.0f) < 0.001f &&
+               std::abs(second_offset.y - first_offset.y * 2.0f) < 0.001f &&
+               first.ToGraph(first.canvas_origin) == second.ToGraph(second.canvas_origin),
+           "A DPI transition must scale view geometry while preserving reference-unit pan semantics");
+}
+
+void TestMeasuredHeaderLayout() {
+    NodeHeaderLayout single_line;
+    const float single_height = MeasureNodeHeaderHeight(16.0f, single_line);
+    NodeHeaderLayout two_lines = single_line;
+    two_lines.maximum_text_lines = 2;
+    const float two_line_height = MeasureNodeHeaderHeight(16.0f, two_lines);
+    Expect(single_height == 28.0f && two_line_height > single_height,
+           "Header height must reserve configured text lines from reference font metrics");
+    Expect(MeasureNodeHeaderHeight(16.0f, two_lines) ==
+               MeasureNodeHeaderHeight(32.0f / 2.0f, two_lines),
+           "Normalized font metrics must keep graph header height invariant across DPI scales");
+}
+
 } // namespace
 
 int main() {
     TestSpatialIndexAgainstBruteForce();
     TestAdaptiveLinkGeometry();
     TestBuiltInAndCustomRouters();
+    TestEditorViewScaling();
+    TestMeasuredHeaderLayout();
     return EXIT_SUCCESS;
 }

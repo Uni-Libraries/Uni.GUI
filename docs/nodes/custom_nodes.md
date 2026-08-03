@@ -76,6 +76,21 @@ Register UI independently by the same `TypeId`. Node body and inspector callback
 using namespace Uni::GUI::Nodes;
 
 Result<void> RegisterGainUi(NodeUiRegistry& ui) {
+    if (auto glyph = ui.RegisterHeaderGlyph(NodeHeaderGlyphDescriptor{
+            .id = "audio.meter",
+            .aspect_ratio = 1.0f,
+            .draw = [](const NodeHeaderGlyphDrawContext& context) {
+                const ImVec2 min{context.min.x, context.min.y};
+                const ImVec2 max{context.max.x, context.max.y};
+                const ImVec2 center{(min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f};
+                context.draw_list.AddCircleFilled(
+                    center,
+                    (max.y - min.y) * 0.35f,
+                    context.color);
+            },
+        }); !glyph) {
+        return glyph;
+    }
     return ui.Register(NodeUiDescriptor{
         .type = TypeId{"audio.gain"},
         .draw_body = [](NodeUiContext& context) {
@@ -93,15 +108,47 @@ Result<void> RegisterGainUi(NodeUiRegistry& ui) {
         },
         .default_size = {240.0f, 110.0f},
         .header_color = 0xFF76512EU,
+        .resolve_header = [](const NodeHeaderContext&) {
+            return NodeHeaderPresentation{
+                .lines = {"Gain", "channel 1"},
+                .items = {
+                    NodeHeaderItem{
+                        .id = "meter",
+                        .content = NodeHeaderGlyph{"audio.meter"},
+                        .active = true,
+                        .action = "open-meter",
+                        .tooltip = "Open meter",
+                    },
+                    NodeHeaderItem{
+                        .id = "domain",
+                        .content = NodeHeaderBadge{"AUDIO"},
+                    },
+                },
+            };
+        },
     });
 }
 ```
 
 Call `EditProperty()` immediately after the ImGui editing item. It uses item activation/deactivation to merge a continuous gesture into one undo record. `SetProperty()` queues an ordinary property command. `Submit()` accepts any custom `Command`.
 
-`NodeUiContext` also exposes the current graph, node, ordered pins, zoom, logical available size, read-only state, and logical-to-screen conversion. Its dynamic pin methods queue add/remove/update/reorder commands and maintain a callback-local shadow so later operations in the same callback see earlier queued pin changes.
+`resolve_header` returns owned text plus generic trailing glyphs or badges. With no explicit text, the editor uses the instance display name, then the semantic type display name, then the `TypeId`. Set `EditorConfig::node_header.maximum_text_lines` to `2` to reserve a measured two-line header for every node. Header height is derived from normalized font metrics, padding, item height, and `minimum_height`; transient subtitle presence never moves pins or routing geometry.
+
+Glyph identifiers are application-defined and registered once in `NodeUiRegistry`. Header item IDs must be non-empty and unique within one node. An item with a non-empty `action` is interactive; activation is returned in `EditorResult::header_actions` with the graph, node, item ID, and action string. Rendering callbacks do not mutate the graph. Badges are informational text items. Colors, active/disabled state, tooltips, ordering, clipping, and narrow-node overflow are handled by the same item model, without runtime or playback semantics in the core library.
+
+The resolver is rendering-only, runs for each visible node, returns owning strings, and must not mutate editor state or the UI registry. Set `EditorConfig::enable_node_collapse` to `false` when nodes in an editor must always remain expanded; the collapse control and context-menu action are then omitted and persisted collapsed state is ignored while rendering.
+
+Set `EditorCallbacks::duplicate_selection` to delegate the built-in `Duplicate` action to an application-owned model. The callback receives the stable editor selection and replaces the generic graph-fragment paste path. It must only enqueue application work; process that work after `DrawEditor()` returns before mutating the document or rebuilding the editor.
+
+`NodeUiContext` also exposes the current graph, node, ordered pins, `UiScale()`, editor `Zoom()`, combined `ScreenScale()`, logical available size, read-only state, and logical-to-screen conversion. Persisted node geometry stays in graph units; `ToScreen()` composes UI scale and zoom exactly once. Its dynamic pin methods queue add/remove/update/reorder commands and maintain a callback-local shadow so later operations in the same callback see earlier queued pin changes.
 
 Callbacks must balance every ImGui stack they modify. They must not execute a command stack, reserve IDs directly, or mutate the document, presentation, or UI registry. Revision/identity-changing direct mutations are rejected; unsupported side effects must not be used even if a particular one is not observable by the callback guard. Queued commands run after callback rendering, as one `CompoundCommand` when more than one is submitted. Read-only contexts ignore submissions and dynamic-pin changes. Full callback rules are in [threading and callbacks](threading_and_callbacks.md).
+
+### Editor Units And Scaling
+
+Node positions, node sizes, routes, pin placement, header layout, node rounding, pin radius, and resize-handle size use persistent graph units. The editor transforms them with `ui_scale * editor_zoom`. Font measurements are normalized back to graph units before they affect label gutters or routing bounds, so moving a window between displays does not change graph geometry.
+
+Pan, link width and hit radius, route-point radius, overlays, minimap size, and explicit editor control sizes use reference UI units. They follow UI scale but remain stable when editor zoom changes. `EditorContext::Pan()` therefore remains display-independent. Dear ImGui framebuffer scaling is renderer-owned and must not be applied to graph or UI geometry again.
 
 ## Arbitrary Pin Layout
 
@@ -111,7 +158,7 @@ Without a custom layout, inputs are placed on the left, outputs on the right, an
 descriptor.layout = [](const NodeUiLayoutContext& context) -> Result<NodeUiLayout> {
     NodeUiLayout result;
     result.body = GraphRect{
-        {8.0f, context.title_height + 8.0f},
+        {8.0f, context.header_height + 8.0f},
         {context.node_size.x - 8.0f, context.node_size.y - 8.0f},
     };
     for (const PinId id : context.node.pins) {
@@ -185,6 +232,18 @@ auto converted = registry.RegisterConversion(ConversionDescriptor{
 ```
 
 The conversion node must already be registered. The named static pins must have input/output directions and must exactly match all three fields of `ConversionKey`. Data and execution conversions for the same type pair are independent. Only one live conversion may exist for one exact key.
+
+Applications with type families can install one compatibility policy:
+
+```cpp
+registry.SetTypeCompatibility(
+    [](const TypeId& output, const TypeId& input, PinKind kind) {
+        return kind == PinKind::Data &&
+            output == TypeId{"float"} && input == TypeId{"number"};
+    });
+```
+
+Exact and wildcard compatibility remains built in. The policy may also match the source and destination sides of registered converters; an exact conversion key takes precedence, while several generalized matches are rejected as ambiguous. Policy exceptions fail closed. `SetTypeCompatibility()` and `ClearTypeCompatibility()` are available on `RegistryCatalog`, `RegistryUpdate`, and `NodeEditorWorkspace`; staging the policy in `RegistryUpdate` publishes it atomically with descriptor and conversion changes. Existing snapshots keep the policy generation they captured.
 
 Every semantic conversion change publishes one immutable catalog generation and increments `RegistryCatalog::ConversionRevision()`; a failed or identical registration replacement leaves revisions and generation unchanged. Application code may capture one passive, copyable owning snapshot without dependency-recording side effects:
 

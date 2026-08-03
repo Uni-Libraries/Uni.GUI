@@ -141,14 +141,16 @@ struct GeometryCache final {
     std::uint64_t router_revision{0};
     std::uint64_t manual_revision{0};
     const ImFont* font{nullptr};
-    float font_size{0.0f};
+    float reference_font_size{0.0f};
     float node_width{0.0f};
-    float title_height{0.0f};
+    float header_height{0.0f};
+    NodeHeaderLayout header_layout;
     float pin_spacing{0.0f};
-    float handle_size{0.0f};
+    float resize_handle_size{0.0f};
     Vec2 minimum_node_size;
     TypeId default_router;
     std::size_t maximum_router_segments{0};
+    bool enable_node_collapse{true};
     std::vector<NodeId> ordered_nodes;
     NodePresentationMap resolved_nodes;
     std::unordered_set<NodeId, IdHash> hidden_nodes;
@@ -214,6 +216,8 @@ struct EditorState {
     std::vector<LinkFlowAnimation> link_flows;
     EditorMetrics metrics;
     std::uint64_t manual_geometry_revision{0};
+    std::uint64_t external_revision{0};
+    bool draw_active{false};
 };
 
 [[nodiscard]] bool InvokeContextMenuCallback(

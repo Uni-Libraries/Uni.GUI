@@ -57,11 +57,12 @@ void EditorFrame::PrepareMinimap() {
         include_transient_world(Detail::PathBounds(path));
     }
 
-    constexpr float MinimapPadding = 8.0f;
+    const float MinimapPadding = ScaleUi(8.0f);
     minimap_max = canvas_max - ImVec2{MinimapPadding, MinimapPadding};
-    minimap_min = minimap_max - ImVec2{config.minimap_size.x, config.minimap_size.y};
-    minimap_visible = config.show_minimap && config.minimap_size.x + MinimapPadding < canvas_size.x &&
-        config.minimap_size.y + MinimapPadding < canvas_size.y;
+    const ImVec2 minimap_size{ScaleUi(config.minimap_size.x), ScaleUi(config.minimap_size.y)};
+    minimap_min = minimap_max - minimap_size;
+    minimap_visible = config.show_minimap && minimap_size.x + MinimapPadding < canvas_size.x &&
+        minimap_size.y + MinimapPadding < canvas_size.y;
     minimap_hovered = minimap_visible && Contains(minimap_min, minimap_max, mouse);
 #if defined(IMGUI_ENABLE_TEST_ENGINE)
     if (minimap_visible) {
@@ -73,8 +74,8 @@ void EditorFrame::PrepareMinimap() {
     }
 #endif
     minimap_scale = std::min(
-        (config.minimap_size.x - 12.0f) / std::max(world_max.x - world_min.x, 1.0f),
-        (config.minimap_size.y - 12.0f) / std::max(world_max.y - world_min.y, 1.0f));
+        (minimap_size.x - ScaleUi(12.0f)) / std::max(world_max.x - world_min.x, 1.0f),
+        (minimap_size.y - ScaleUi(12.0f)) / std::max(world_max.y - world_min.y, 1.0f));
 
     if (std::holds_alternative<Idle>(session.interaction) && minimap_hovered &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -92,24 +93,24 @@ void EditorFrame::PrepareMinimap() {
 
 void EditorFrame::NavigateMinimap() {
     const ImVec2 local{
-        std::clamp(mouse.x, minimap_min.x + 6.0f, minimap_max.x - 6.0f),
-        std::clamp(mouse.y, minimap_min.y + 6.0f, minimap_max.y - 6.0f),
+        std::clamp(mouse.x, minimap_min.x + ScaleUi(6.0f), minimap_max.x - ScaleUi(6.0f)),
+        std::clamp(mouse.y, minimap_min.y + ScaleUi(6.0f), minimap_max.y - ScaleUi(6.0f)),
     };
     session.minimap_navigation = Vec2{
-        world_min.x + (local.x - minimap_min.x - 6.0f) / minimap_scale,
-        world_min.y + (local.y - minimap_min.y - 6.0f) / minimap_scale,
+        world_min.x + (local.x - minimap_min.x - ScaleUi(6.0f)) / minimap_scale,
+        world_min.y + (local.y - minimap_min.y - ScaleUi(6.0f)) / minimap_scale,
     };
 }
 
 ImVec2 EditorFrame::ToMinimap(const Vec2 point) const noexcept {
-    return minimap_min + ImVec2{6.0f, 6.0f} +
+    return minimap_min + ImVec2{ScaleUi(6.0f), ScaleUi(6.0f)} +
         ImVec2{(point.x - world_min.x) * minimap_scale, (point.y - world_min.y) * minimap_scale};
 }
 
 void EditorFrame::RenderMinimap() {
     if (!minimap_visible) return;
     const auto& cache = session.geometry;
-    draw_list->AddRectFilled(minimap_min, minimap_max, style.minimap_background, 4.0f);
+    draw_list->AddRectFilled(minimap_min, minimap_max, style.minimap_background, ScaleUi(4.0f));
     draw_list->PushClipRect(minimap_min, minimap_max, true);
     for (const auto& [group_id, geometry] : cache.groups) {
         const auto group = presentation.Groups().find(group_id);
@@ -125,7 +126,7 @@ void EditorFrame::RenderMinimap() {
             group->second.style->kind == GroupKind::Comment
                 ? style.comment
                 : group->second.style->color,
-            1.0f);
+            ScaleUi(1.0f));
     }
     for (const auto& [node_id, geometry] : cache.nodes) {
         const GraphRect bounds = CurrentNodeBounds(node_id).value_or(geometry.bounds);
@@ -134,23 +135,23 @@ void EditorFrame::RenderMinimap() {
             ToMinimap(bounds.min),
             ToMinimap(bounds.max),
             node != nullptr ? node->color.value_or(style.node) : style.node,
-            1.0f);
+            ScaleUi(1.0f));
     }
     draw_list->AddRect(
         ToMinimap(ToGraph(canvas_origin)),
         ToMinimap(ToGraph(canvas_max)),
         style.minimap_viewport,
-        1.0f,
+        ScaleUi(1.0f),
         0,
-        2.0f);
+        ScaleUi(2.0f));
     draw_list->PopClipRect();
     draw_list->AddRect(
         minimap_min,
         minimap_max,
         minimap_hovered ? style.selection : style.group_border,
-        4.0f,
+        ScaleUi(4.0f),
         0,
-        minimap_hovered ? 2.0f : 1.0f);
+        ScaleUi(minimap_hovered ? 2.0f : 1.0f));
 }
 
 } // namespace Uni::GUI::Nodes::EditorDetail

@@ -20,12 +20,13 @@ void EditorFrame::RenderDebugOverlays() {
         enabled(EditorDebugOverlay::PinNormals) || enabled(EditorDebugOverlay::EntityIds)) {
         for (const auto& node : node_geometry) {
             if (enabled(EditorDebugOverlay::NodeBounds)) {
-                draw_list->AddRect(node.min, node.max, style.debug_node_bounds, 0.0f, 0, style.debug_line_width);
+                draw_list->AddRect(node.min, node.max, style.debug_node_bounds, 0.0f, 0,
+                                   ScaleUi(style.debug_line_width));
             }
             if (enabled(EditorDebugOverlay::NodeBodyBounds) && node.body_max.x > node.body_min.x &&
                 node.body_max.y > node.body_min.y) {
                 draw_list->AddRect(node.body_min, node.body_max, style.debug_node_body_bounds, 0.0f, 0,
-                                   style.debug_line_width);
+                                    ScaleUi(style.debug_line_width));
             }
             if (enabled(EditorDebugOverlay::PinNormals)) {
                 for (const auto& pin : node.pins) {
@@ -35,14 +36,15 @@ void EditorFrame::RenderDebugOverlays() {
                         pin.outward_normal.x / length,
                         pin.outward_normal.y / length,
                     };
-                    draw_list->AddLine(pin.position, pin.position + normal * style.debug_pin_normal_length,
-                                       style.debug_pin_normals, style.debug_line_width);
-                    draw_list->AddCircleFilled(pin.position, 2.0f, style.debug_pin_normals, 8);
+                    draw_list->AddLine(pin.position, pin.position + normal * ScaleUi(style.debug_pin_normal_length),
+                                       style.debug_pin_normals, ScaleUi(style.debug_line_width));
+                    draw_list->AddCircleFilled(pin.position, ScaleUi(2.0f), style.debug_pin_normals, 8);
                 }
             }
             if (enabled(EditorDebugOverlay::EntityIds)) {
                 const std::string label = "Node " + std::to_string(node.id.Value());
-                draw_list->AddText(node.min + ImVec2{4.0f, -ImGui::GetFontSize()}, style.debug_text, label.c_str());
+                draw_list->AddText(node.min + ImVec2{ScaleUi(4.0f), -ImGui::GetFontSize()}, style.debug_text,
+                                   label.c_str());
             }
         }
     }
@@ -57,7 +59,7 @@ void EditorFrame::RenderDebugOverlays() {
             const GraphRect bounds = Detail::PathBounds(*path);
             if (enabled(EditorDebugOverlay::LinkBounds)) {
                 draw_list->AddRect(ToScreen(bounds.min), ToScreen(bounds.max), style.debug_link_bounds, 0.0f, 0,
-                                   style.debug_line_width);
+                                    ScaleUi(style.debug_line_width));
             }
             if (enabled(EditorDebugOverlay::LinkRoutes)) {
                 for (const auto& segment : path->segments) {
@@ -66,9 +68,11 @@ void EditorFrame::RenderDebugOverlays() {
                             using Primitive = std::remove_cvref_t<decltype(primitive)>;
                             if constexpr (std::same_as<Primitive, LinePathSegment>) {
                                 draw_list->AddLine(ToScreen(primitive.start), ToScreen(primitive.end),
-                                                   style.debug_link_routes, style.debug_line_width);
-                                draw_list->AddCircleFilled(ToScreen(primitive.start), 2.0f, style.debug_link_routes, 8);
-                                draw_list->AddCircleFilled(ToScreen(primitive.end), 2.0f, style.debug_link_routes, 8);
+                                                   style.debug_link_routes, ScaleUi(style.debug_line_width));
+                                draw_list->AddCircleFilled(ToScreen(primitive.start), ScaleUi(2.0f),
+                                                           style.debug_link_routes, 8);
+                                draw_list->AddCircleFilled(ToScreen(primitive.end), ScaleUi(2.0f),
+                                                           style.debug_link_routes, 8);
                             } else {
                                 const std::array<ImVec2, 4> controls{
                                     ToScreen(primitive.p0),
@@ -78,9 +82,9 @@ void EditorFrame::RenderDebugOverlays() {
                                 };
                                 draw_list->AddPolyline(controls.data(), static_cast<int>(controls.size()),
                                                        style.debug_link_routes, ImDrawFlags_None,
-                                                       style.debug_line_width);
+                                                        ScaleUi(style.debug_line_width));
                                 for (const ImVec2 point : controls) {
-                                    draw_list->AddCircleFilled(point, 2.0f, style.debug_link_routes, 8);
+                                    draw_list->AddCircleFilled(point, ScaleUi(2.0f), style.debug_link_routes, 8);
                                 }
                             }
                         },
@@ -96,7 +100,7 @@ void EditorFrame::RenderDebugOverlays() {
 
     if (enabled(EditorDebugOverlay::WorldBounds) && session.geometry.has_world_bounds) {
         draw_list->AddRect(ToScreen(session.geometry.world_bounds.min), ToScreen(session.geometry.world_bounds.max),
-                           style.debug_world_bounds, 0.0f, 0, style.debug_line_width);
+                           style.debug_world_bounds, 0.0f, 0, ScaleUi(style.debug_line_width));
     }
 
     if (enabled(EditorDebugOverlay::Metrics)) {
@@ -114,12 +118,12 @@ void EditorFrame::RenderDebugOverlays() {
                       static_cast<unsigned long long>(metrics.adaptive_segments),
                       static_cast<unsigned long long>(metrics.visible_nodes),
                       static_cast<unsigned long long>(metrics.visible_link_segments));
-        const ImVec2 padding{6.0f, 5.0f};
+        const ImVec2 padding{ScaleUi(6.0f), ScaleUi(5.0f)};
         const ImVec2 text_size = ImGui::CalcTextSize(text.data());
-        const ImVec2 panel_max = canvas_max - ImVec2{8.0f, 8.0f};
+        const ImVec2 panel_max = canvas_max - ImVec2{ScaleUi(8.0f), ScaleUi(8.0f)};
         const ImVec2 panel_min = panel_max - text_size - padding * 2.0f;
-        draw_list->AddRectFilled(panel_min, panel_max, 0xD0101010U, 3.0f);
-        draw_list->AddRect(panel_min, panel_max, style.debug_text, 3.0f);
+        draw_list->AddRectFilled(panel_min, panel_max, 0xD0101010U, ScaleUi(3.0f));
+        draw_list->AddRect(panel_min, panel_max, style.debug_text, ScaleUi(3.0f));
         draw_list->AddText(panel_min + padding, style.debug_text, text.data());
     }
 }
@@ -141,8 +145,8 @@ bool EditorFrame::RenderOverlays() {
         const float logical_radius = pin_style.radius && std::isfinite(*pin_style.radius) && *pin_style.radius > 0.0f
                                          ? *pin_style.radius
                                          : style.pin_radius;
-        draw_list->AddCircle(pin_positions.at(hovered_pin), logical_radius * session.zoom + 4.0f, style.link_hovered,
-                             16, 2.0f);
+        draw_list->AddCircle(pin_positions.at(hovered_pin), ScaleGraph(logical_radius) + ScaleUi(4.0f),
+                             style.link_hovered, 16, ScaleUi(2.0f));
     }
     for (const auto& point : route_point_geometry) {
         if (!session.selected_links.contains(point.link) && !session.selected_route_points.contains(point.point) &&
@@ -150,9 +154,9 @@ bool EditorFrame::RenderOverlays() {
             continue;
         }
         const bool selected = session.selected_route_points.contains(point.point);
-        const float radius = selected ? style.handle_size * 0.7f : style.handle_size * 0.5f;
+        const float radius = ScaleUi(selected ? style.route_point_radius * 1.4f : style.route_point_radius);
         draw_list->AddCircleFilled(point.position, radius, selected ? style.selection : style.route_point, 12);
-        draw_list->AddCircle(point.position, radius + 2.0f, style.background, 12, 1.5f);
+        draw_list->AddCircle(point.position, radius + ScaleUi(2.0f), style.background, 12, ScaleUi(1.5f));
     }
 
     splitter.SetCurrentChannel(draw_list, overlay_channel);
@@ -160,7 +164,7 @@ bool EditorFrame::RenderOverlays() {
         const ImVec2 min = Min(marquee->start, marquee->current);
         const ImVec2 max = Max(marquee->start, marquee->current);
         draw_list->AddRectFilled(min, max, (style.selection & 0x00FFFFFFU) | 0x40000000U);
-        draw_list->AddRect(min, max, style.selection, 0.0f, 0, 1.5f);
+        draw_list->AddRect(min, max, style.selection, 0.0f, 0, ScaleUi(1.5f));
     }
     if (const auto* creating = std::get_if<CreatingLink>(&session.interaction);
         creating != nullptr && creating->dragging) {
@@ -233,12 +237,12 @@ bool EditorFrame::RenderOverlays() {
                                 [&](const auto& primitive) {
                                     using Primitive = std::remove_cvref_t<decltype(primitive)>;
                                     if constexpr (std::same_as<Primitive, LinePathSegment>) {
-                                        draw_list->AddLine(ToScreen(primitive.start), ToScreen(primitive.end), color,
-                                                           style.link_width);
+                                         draw_list->AddLine(ToScreen(primitive.start), ToScreen(primitive.end), color,
+                                                           ScaleUi(style.link_width));
                                     } else {
                                         draw_list->AddBezierCubic(ToScreen(primitive.p0), ToScreen(primitive.p1),
                                                                   ToScreen(primitive.p2), ToScreen(primitive.p3), color,
-                                                                  style.link_width);
+                                                                  ScaleUi(style.link_width));
                                     }
                                 },
                                 segment.primitive);
@@ -267,10 +271,19 @@ bool EditorFrame::RenderOverlays() {
                 });
             if (had_group) hint = "Remove from group";
         }
-        if (!hint.empty()) draw_list->AddText(mouse + ImVec2{14.0f, 18.0f}, style.text, hint.c_str());
+        if (!hint.empty()) draw_list->AddText(mouse + ImVec2{ScaleUi(14.0f), ScaleUi(18.0f)}, style.text,
+                                              hint.c_str());
     }
     if (has_link_preview && link_preview.status != ConnectionResult::Status::Allowed && hovered_pin) {
         ImGui::SetTooltip("%s", link_preview.reason.c_str());
+    }
+    if (hovered_header_item) {
+        const auto& geometry = header_item_geometry[*hovered_header_item];
+        const auto header = node_headers.find(geometry.node);
+        if (header != node_headers.end() && geometry.item_index < header->second.items.size()) {
+            const auto& tooltip = header->second.items[geometry.item_index].tooltip;
+            if (!tooltip.empty()) ImGui::SetTooltip("%s", tooltip.c_str());
+        }
     }
     RenderDebugOverlays();
     return true;

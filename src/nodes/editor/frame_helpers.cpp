@@ -42,19 +42,28 @@ std::string Lower(const std::string_view value) {
 }
 
 bool ValidConfig(const EditorConfig& config) noexcept {
+    const auto& header = config.node_header;
     return std::isfinite(config.min_zoom) && std::isfinite(config.max_zoom) &&
         std::isfinite(config.zoom_step) && std::isfinite(config.grid_size) &&
-        std::isfinite(config.node_width) && std::isfinite(config.title_height) &&
-        std::isfinite(config.pin_spacing) && std::isfinite(config.link_hit_radius) &&
-        std::isfinite(config.link_flatten_tolerance) && std::isfinite(config.snap_size) &&
-        std::isfinite(config.link_flow_duration) && std::isfinite(config.link_flow_speed) &&
-        std::isfinite(config.link_flow_marker_spacing) &&
+        std::isfinite(config.node_width) && std::isfinite(header.minimum_height) &&
+        std::isfinite(header.horizontal_padding) && std::isfinite(header.vertical_padding) &&
+        std::isfinite(header.line_spacing) && std::isfinite(header.primary_text_scale) &&
+        std::isfinite(header.secondary_text_scale) && std::isfinite(header.item_height) &&
+        std::isfinite(header.item_spacing) && std::isfinite(header.collapse_width) &&
+        std::isfinite(header.minimum_text_width) && std::isfinite(config.pin_spacing) &&
+        std::isfinite(config.link_hit_radius) && std::isfinite(config.link_flatten_tolerance) &&
+        std::isfinite(config.snap_size) && std::isfinite(config.link_flow_duration) &&
+        std::isfinite(config.link_flow_speed) && std::isfinite(config.link_flow_marker_spacing) &&
         std::isfinite(config.minimum_node_size.x) && std::isfinite(config.minimum_node_size.y) &&
         std::isfinite(config.minimum_group_size.x) && std::isfinite(config.minimum_group_size.y) &&
         std::isfinite(config.minimap_size.x) && std::isfinite(config.minimap_size.y) &&
         config.min_zoom > 0.0f && config.min_zoom <= config.max_zoom &&
         config.zoom_step > 0.0f && config.grid_size > 0.0f && config.node_width > 0.0f &&
-        config.title_height > 0.0f && config.pin_spacing > 0.0f && config.link_hit_radius >= 0.0f &&
+        header.maximum_text_lines >= 1 && header.maximum_text_lines <= 2 && header.minimum_height >= 0.0f &&
+        header.horizontal_padding >= 0.0f && header.vertical_padding >= 0.0f && header.line_spacing >= 0.0f &&
+        header.primary_text_scale > 0.0f && header.secondary_text_scale > 0.0f &&
+        header.item_height > 0.0f && header.item_spacing >= 0.0f && header.collapse_width > 0.0f &&
+        header.minimum_text_width >= 0.0f && config.pin_spacing > 0.0f && config.link_hit_radius >= 0.0f &&
         config.link_flatten_tolerance > 0.0f && !config.default_link_router.Empty() &&
         config.maximum_router_segments > 0 && config.snap_size > 0.0f &&
         config.link_flow_duration > 0.0f && config.link_flow_speed > 0.0f &&
@@ -67,11 +76,13 @@ bool ValidConfig(const EditorConfig& config) noexcept {
 bool ValidStyle(const EditorStyle& style) noexcept {
     return std::isfinite(style.node_rounding) && std::isfinite(style.node_border_width) &&
         std::isfinite(style.link_width) && std::isfinite(style.pin_radius) &&
-        std::isfinite(style.handle_size) && std::isfinite(style.link_flow_marker_radius) &&
+        std::isfinite(style.resize_handle_size) && std::isfinite(style.route_point_radius) &&
+        std::isfinite(style.link_flow_marker_radius) &&
         std::isfinite(style.link_flow_outline_width) && std::isfinite(style.debug_line_width) &&
         std::isfinite(style.debug_pin_normal_length) && style.node_rounding >= 0.0f &&
         style.node_border_width >= 0.0f && style.link_width > 0.0f &&
-        style.pin_radius > 0.0f && style.handle_size > 0.0f &&
+        style.pin_radius > 0.0f && style.resize_handle_size > 0.0f &&
+        style.route_point_radius > 0.0f &&
         style.link_flow_marker_radius > 0.0f && style.link_flow_outline_width >= 0.0f &&
         style.debug_line_width > 0.0f && style.debug_pin_normal_length > 0.0f;
 }

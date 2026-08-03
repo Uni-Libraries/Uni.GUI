@@ -59,6 +59,7 @@ NodeUiContext::NodeUiContext(
     const GraphId graph,
     const GraphDocument& document,
     const NodeInstance& node,
+    const float ui_scale,
     const float zoom,
     const Vec2 available_size,
     CommandSink command_sink,
@@ -67,6 +68,7 @@ NodeUiContext::NodeUiContext(
     : m_graph(graph),
       m_document(&document),
       m_node(&node),
+      m_ui_scale(ui_scale),
       m_zoom(zoom),
       m_available_size(available_size),
       m_command_sink(std::move(command_sink)),
@@ -87,11 +89,13 @@ const PinInstance* NodeUiContext::FindPin(const PinId pin) const noexcept {
     }
     return m_document->FindPin(m_graph, pin);
 }
+float NodeUiContext::UiScale() const noexcept { return m_ui_scale; }
 float NodeUiContext::Zoom() const noexcept { return m_zoom; }
+float NodeUiContext::ScreenScale() const noexcept { return m_ui_scale * m_zoom; }
 Vec2 NodeUiContext::AvailableSize() const noexcept { return m_available_size; }
 bool NodeUiContext::ReadOnly() const noexcept { return m_read_only; }
-float NodeUiContext::ToScreen(const float logical_size) const noexcept { return logical_size * m_zoom; }
-Vec2 NodeUiContext::ToScreen(const Vec2 logical_size) const noexcept { return logical_size * m_zoom; }
+float NodeUiContext::ToScreen(const float logical_size) const noexcept { return logical_size * ScreenScale(); }
+Vec2 NodeUiContext::ToScreen(const Vec2 logical_size) const noexcept { return logical_size * ScreenScale(); }
 
 const PropertyValue* NodeUiContext::FindProperty(const std::string_view key) const {
     const auto found = m_node->properties.find(std::string(key));
@@ -229,6 +233,7 @@ void NodeUiContext::ReorderDynamicPins(std::vector<PinId> order) {
 
 struct NodeUiRegistry::Impl final {
     std::map<TypeId, NodeUiDescriptor> nodes;
+    std::map<std::string, NodeHeaderGlyphDescriptor, std::less<>> header_glyphs;
     std::map<TypeId, PinStyleFn> pin_styles;
     std::uint64_t revision{0};
     std::uint64_t layout_revision{0};
@@ -280,6 +285,29 @@ const NodeUiDescriptor* NodeUiRegistry::Find(const TypeId& type) const noexcept 
 std::uint64_t NodeUiRegistry::Identity() const noexcept { return m_impl->identity; }
 std::uint64_t NodeUiRegistry::Revision() const noexcept { return m_impl->revision; }
 std::uint64_t NodeUiRegistry::LayoutRevision() const noexcept { return m_impl->layout_revision; }
+
+Result<void> NodeUiRegistry::RegisterHeaderGlyph(NodeHeaderGlyphDescriptor descriptor) {
+    if (descriptor.id.empty() || !std::isfinite(descriptor.aspect_ratio) ||
+        descriptor.aspect_ratio <= 0.0f || !descriptor.draw) {
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Header glyph descriptor is invalid"));
+    }
+    if (!m_impl->header_glyphs.emplace(descriptor.id, std::move(descriptor)).second) {
+        return std::unexpected(MakeError(ErrorCode::DuplicateId, "Header glyph is already registered"));
+    }
+    ++m_impl->revision;
+    return {};
+}
+
+bool NodeUiRegistry::UnregisterHeaderGlyph(const std::string_view id) {
+    if (m_impl->header_glyphs.erase(id) == 0) return false;
+    ++m_impl->revision;
+    return true;
+}
+
+const NodeHeaderGlyphDescriptor* NodeUiRegistry::FindHeaderGlyph(const std::string_view id) const noexcept {
+    const auto found = m_impl->header_glyphs.find(id);
+    return found != m_impl->header_glyphs.end() ? &found->second : nullptr;
+}
 
 Result<void> NodeUiRegistry::RegisterPinStyle(TypeId type, PinStyleFn style) {
     if (type.Empty() || !style) {
@@ -334,12 +362,20 @@ NodeUiResult DrawNodeInspector(
 
     std::vector<std::unique_ptr<Command>> pending;
     const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float resolved_ui_scale = ImGui::GetStyle().FontScaleMain * ImGui::GetStyle().FontScaleDpi;
+    const float ui_scale = std::isfinite(resolved_ui_scale) && resolved_ui_scale > 0.0f
+        ? resolved_ui_scale
+        : 1.0f;
     NodeUiContext context{
         graph,
         document,
         *node,
+        ui_scale,
         1.0f,
-        {std::max(available.x, 0.0f), std::max(available.y, 0.0f)},
+        {
+            std::max(available.x, 0.0f) / ui_scale,
+            std::max(available.y, 0.0f) / ui_scale,
+        },
         [&](std::unique_ptr<Command> command) { pending.push_back(std::move(command)); },
         [&] { return document.AllocatePinId(); },
         read_only,

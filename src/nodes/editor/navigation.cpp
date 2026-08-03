@@ -1,5 +1,6 @@
 #include "internal.h"
 
+#include <limits>
 #include <variant>
 
 namespace Uni::GUI::Nodes {
@@ -34,6 +35,7 @@ Result<void> EditorContext::ResetNavigation(const GraphDocument& document, Graph
     state.interaction = EditorDetail::Idle{};
     state.context_target.reset();
     state.node_popup_graph = {};
+    if (state.external_revision != std::numeric_limits<std::uint64_t>::max()) ++state.external_revision;
     return {};
 }
 
@@ -84,6 +86,7 @@ Result<void> EditorContext::EnterSubgraph(const GraphDocument& document, const N
     state.context_target.reset();
     state.node_popup_graph = {};
     state.minimap_navigation.reset();
+    if (state.external_revision != std::numeric_limits<std::uint64_t>::max()) ++state.external_revision;
     return {};
 }
 
@@ -110,6 +113,7 @@ bool EditorContext::NavigateBack() noexcept {
     state.context_target.reset();
     state.node_popup_graph = {};
     state.minimap_navigation.reset();
+    if (state.external_revision != std::numeric_limits<std::uint64_t>::max()) ++state.external_revision;
     return true;
 }
 

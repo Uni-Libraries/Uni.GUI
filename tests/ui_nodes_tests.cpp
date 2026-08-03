@@ -2720,18 +2720,26 @@ void TestStageThreeEditorGestures() {
     };
 
     (void)draw_frame();
-    const ImVec2 source_min = source_body_min - ImVec2{8.0f, 36.0f};
+    const float header_height = config.node_header.minimum_height;
+    const ImVec2 source_min = source_body_min - ImVec2{8.0f, header_height + 8.0f};
     const ImVec2 canvas_origin = source_min - ImVec2{20.0f, 20.0f};
-    const ImVec2 collapse_control = source_min + ImVec2{177.0f, 14.0f};
+    const ImVec2 collapse_control =
+        source_min + ImVec2{config.node_width - (config.node_header.collapse_width + 2.0f) * 0.5f,
+                            header_height * 0.5f};
     const auto collapsed = click(collapse_control);
     Expect(collapsed.presentation_changed && presentation.FindNode(source_id)->collapsed,
            "Node collapse control must commit through the command stack");
     (void)click(collapse_control);
     Expect(!presentation.FindNode(source_id)->collapsed, "Node collapse control must expand a collapsed node");
+    config.enable_node_collapse = false;
+    (void)click(collapse_control);
+    Expect(!presentation.FindNode(source_id)->collapsed, "Disabled node collapse must turn the former control area into ordinary header input");
+    config.enable_node_collapse = true;
 
-    const ImVec2 resize_handle = source_min + ImVec2{188.0f, 60.0f};
+    const float source_height = header_height + config.pin_spacing + 10.0f;
+    const ImVec2 resize_handle = source_min + ImVec2{config.node_width - 2.0f, source_height - 2.0f};
     const auto resized = drag(resize_handle, resize_handle + ImVec2{52.0f, 38.0f});
-    Expect(resized.presentation_changed && presentation.FindNode(source_id)->size == Vec2{242.0f, 100.0f},
+    Expect(resized.presentation_changed && presentation.FindNode(source_id)->size == Vec2{242.0f, source_height + 38.0f},
            "Node resize gesture must persist the resolved logical size");
 
     editor.SetSelection(GraphSelection{
@@ -2754,22 +2762,25 @@ void TestStageThreeEditorGestures() {
     Execute(commands, std::make_unique<DeleteElementsCommand>(graph, std::vector<NodeId>{}, std::vector<LinkId>{link}),
             document, presentation, types, "Gesture link delete must execute");
     (void)draw_frame();
-    const ImVec2 current_source_min = source_body_min - ImVec2{8.0f, 36.0f};
+    const ImVec2 current_source_min = source_body_min - ImVec2{8.0f, header_height + 8.0f};
     const float sink_input_gutter = ImGui::CalcTextSize("Value").x + 18.0f;
-    const ImVec2 current_sink_min = sink_body_min - ImVec2{sink_input_gutter + 8.0f, 36.0f};
-    const ImVec2 output_position = current_source_min + ImVec2{242.0f, 40.0f};
-    const ImVec2 input_position = current_sink_min + ImVec2{0.0f, 40.0f};
+    const ImVec2 current_sink_min = sink_body_min - ImVec2{sink_input_gutter + 8.0f, header_height + 8.0f};
+    const float pin_y = header_height + config.pin_spacing * 0.5f;
+    const ImVec2 output_position = current_source_min + ImVec2{242.0f, pin_y};
+    const ImVec2 input_position = current_sink_min + ImVec2{0.0f, pin_y};
     const auto reconnected = drag(output_position, input_position + ImVec2{12.0f, 8.0f});
     Expect(reconnected.model_changed && document.FindGraph(graph)->links.size() == 1,
            "Link drag must magnetically acquire a nearby compatible pin after "
            "deletion");
 
-    const ImVec2 outside_drag_start = source_body_min - ImVec2{8.0f, 36.0f} + ImVec2{30.0f, 14.0f};
+    const ImVec2 outside_drag_start =
+        source_body_min - ImVec2{8.0f, header_height + 8.0f} + ImVec2{30.0f, header_height * 0.5f};
     const auto removed_from_group = drag(outside_drag_start, outside_drag_start + ImVec2{24.0f, 0.0f});
     Expect(removed_from_group.presentation_changed && presentation.FindGroup(group)->members.empty(),
            "Dragging a member outside every group must remove its membership");
     const Vec2 before_group_drop = presentation.FindNode(source_id)->position;
-    const ImVec2 inside_drag_start = source_body_min - ImVec2{8.0f, 36.0f} + ImVec2{30.0f, 14.0f};
+    const ImVec2 inside_drag_start =
+        source_body_min - ImVec2{8.0f, header_height + 8.0f} + ImVec2{30.0f, header_height * 0.5f};
     const ImVec2 group_drop = canvas_origin + ImVec2{90.0f, 255.0f};
     const auto added_to_group = drag(inside_drag_start, group_drop);
     Expect(added_to_group.presentation_changed &&
@@ -2793,8 +2804,15 @@ void TestNodeUiExtensibility() {
     int body_calls = 0;
     int inspector_calls = 0;
     int pin_style_calls = 0;
+    int header_state_calls = 0;
+    int header_glyph_calls = 0;
+    int duplicate_calls = 0;
+    GraphSelection duplicated_selection;
+    NodeId header_item_node;
     ImVec2 body_button_min;
     ImVec2 body_button_max;
+    ImVec2 header_glyph_min;
+    ImVec2 header_glyph_max;
 
     Expect(!registry.RegisterNodeType(NodeTypeDescriptor{
                .type = TypeId{"ui.invalid"},
@@ -2841,6 +2859,20 @@ void TestNodeUiExtensibility() {
                })
                .has_value(),
            "Typed UI node descriptor must register");
+    Expect(ui.RegisterHeaderGlyph(NodeHeaderGlyphDescriptor{
+                  .id = "test.play",
+                  .aspect_ratio = 1.0f,
+                  .draw = [&](const NodeHeaderGlyphDrawContext& context) {
+                      ++header_glyph_calls;
+                      const ImVec2 min{context.min.x, context.min.y};
+                      const ImVec2 max{context.max.x, context.max.y};
+                      header_glyph_min = min;
+                      header_glyph_max = max;
+                      context.draw_list.AddTriangleFilled(
+                          {min.x, min.y}, {min.x, max.y}, {max.x, (min.y + max.y) * 0.5f}, context.color);
+                  },
+              }).has_value(),
+           "Custom header glyph must register independently");
     Expect(ui.Register(NodeUiDescriptor{
                            .type = TypeId{"ui.test"},
                            .draw_body =
@@ -2879,6 +2911,29 @@ void TestNodeUiExtensibility() {
                                },
                            .default_size = {260.0f, 120.0f},
                            .header_color = 0xFF664422U,
+                           .resolve_header =
+                               [&](const NodeHeaderContext& context) {
+                                   ++header_state_calls;
+                                   if (context.node.id != header_item_node) {
+                                       return NodeHeaderPresentation{.lines = {"UI test", "runtime-id"}};
+                                   }
+                                   return NodeHeaderPresentation{
+                                       .lines = {"UI test", "runtime-id"},
+                                       .items = {
+                                           NodeHeaderItem{
+                                               .id = "state",
+                                               .content = NodeHeaderGlyph{"test.play"},
+                                               .active = true,
+                                               .action = "inspect-runtime",
+                                               .tooltip = "Inspect runtime state",
+                                           },
+                                           NodeHeaderItem{
+                                               .id = "kind",
+                                               .content = NodeHeaderBadge{"LIVE"},
+                                           },
+                                       },
+                                   };
+                               },
                        })
                .has_value(),
            "Node UI descriptor must register independently");
@@ -2899,6 +2954,7 @@ void TestNodeUiExtensibility() {
     Expect(creation.has_value(), "Typed UI node must instantiate");
     const GraphId graph = document.RootGraph();
     const NodeId node = creation->node.id;
+    header_item_node = node;
     const PinId output = creation->pins.front().id;
     Expect(std::get<bool>(creation->node.properties.at("enabled")) == false &&
                std::get<std::int64_t>(creation->node.properties.at("count")) == 7 &&
@@ -2944,19 +3000,28 @@ void TestNodeUiExtensibility() {
     Expect(pixels != nullptr, "Node UI font atlas must build");
 
     EditorContext editor;
+    EditorConfig editor_config;
+    editor_config.node_header.maximum_text_lines = 2;
+    EditorCallbacks editor_callbacks;
+    editor_callbacks.duplicate_selection = [&](const GraphSelection& selection) {
+        ++duplicate_calls;
+        duplicated_selection = selection;
+    };
     const auto draw_editor_frame = [&] {
         ImGui::NewFrame();
         ImGui::SetNextWindowPos({0.0f, 0.0f});
         ImGui::SetNextWindowSize(io.DisplaySize);
         ImGui::Begin("Node UI body", nullptr, ImGuiWindowFlags_NoDecoration);
         const auto frame_result =
-            DrawEditor(editor, document, presentation, commands, registry, ui, routers, {640.0f, 480.0f});
+            DrawEditor(editor, document, presentation, commands, registry, ui, routers,
+                       {640.0f, 480.0f}, {}, editor_config, editor_callbacks);
         ImGui::End();
         ImGui::Render();
         return frame_result;
     };
     const auto initial_frame = draw_editor_frame();
-    Expect(body_calls == 2 && pin_style_calls > 0, "Editor must invoke custom body and pin style callbacks");
+    Expect(body_calls == 2 && pin_style_calls > 0 && header_state_calls == 2 && header_glyph_calls == 1,
+           "Editor must invoke custom body, header presentation, glyph, and pin style callbacks");
     Expect(!initial_frame.model_changed && !std::get<bool>(document.FindNode(graph, node)->properties.at("enabled")),
            "Rendering a custom widget must remain read-only until interaction");
     const ImVec2 body_button_center = (body_button_min + body_button_max) * 0.5f;
@@ -2970,6 +3035,38 @@ void TestNodeUiExtensibility() {
                !std::get<bool>(document.FindNode(graph, lower_node)->properties.at("enabled")),
            "Only the topmost embedded ImGui widget must receive an overlapping "
            "mouse click");
+
+    const ImVec2 header_glyph_center = (header_glyph_min + header_glyph_max) * 0.5f;
+    io.AddMousePosEvent(header_glyph_center.x, header_glyph_center.y);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    const auto header_action_frame = draw_editor_frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    (void)draw_editor_frame();
+    Expect(header_action_frame.header_actions.size() == 1 &&
+               header_action_frame.header_actions.front().graph == graph &&
+               header_action_frame.header_actions.front().node == node &&
+               header_action_frame.header_actions.front().item == "state" &&
+               header_action_frame.header_actions.front().action == "inspect-runtime",
+           "Actionable header glyphs must report a stable application action without mutating the graph");
+
+    header_item_node = lower_node;
+    (void)draw_editor_frame();
+    const ImVec2 obscured_glyph_center = (header_glyph_min + header_glyph_max) * 0.5f;
+    io.AddMousePosEvent(obscured_glyph_center.x, obscured_glyph_center.y);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    const auto obscured_action_frame = draw_editor_frame();
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    (void)draw_editor_frame();
+    Expect(obscured_action_frame.header_actions.empty(),
+           "Header actions on lower nodes must not receive clicks through an overlapping top node");
+    header_item_node = node;
+
+    editor.SetSelection(GraphSelection{.graph = graph, .nodes = {node}});
+    editor.DuplicateSelection();
+    const auto duplicate_frame = draw_editor_frame();
+    Expect(duplicate_calls == 1 && duplicated_selection.graph == graph &&
+               duplicated_selection.nodes == std::vector<NodeId>{node} && !duplicate_frame.model_changed,
+           "Application-owned duplication must use the same deferred action path as editor requests");
 
     ImGui::NewFrame();
     ImGui::Begin("Node UI inspector");
@@ -3582,7 +3679,7 @@ void TestStageFiveEditorGeometryCacheAndRouting() {
                         .layout = [&](const NodeUiLayoutContext& context) -> Result<NodeUiLayout> {
                             ++layout_calls;
                             NodeUiLayout layout;
-                            layout.body = GraphRect{{8.0f, context.title_height + 8.0f},
+                            layout.body = GraphRect{{8.0f, context.header_height + 8.0f},
                                                     {context.node_size.x - 8.0f, context.node_size.y - 20.0f}};
                             for (const PinId pin_id : context.node.pins) {
                                 const auto& pin = context.graph.pins.at(pin_id);

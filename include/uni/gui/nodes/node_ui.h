@@ -14,7 +14,10 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
+
+struct ImDrawList;
 
 namespace Uni::GUI::Nodes {
 
@@ -27,6 +30,7 @@ public:
         GraphId graph,
         const GraphDocument& document,
         const NodeInstance& node,
+        float ui_scale,
         float zoom,
         Vec2 available_size,
         CommandSink command_sink,
@@ -37,7 +41,9 @@ public:
     [[nodiscard]] const NodeInstance& Node() const noexcept;
     [[nodiscard]] std::vector<PinId> Pins() const;
     [[nodiscard]] const PinInstance* FindPin(PinId pin) const noexcept;
+    [[nodiscard]] float UiScale() const noexcept;
     [[nodiscard]] float Zoom() const noexcept;
+    [[nodiscard]] float ScreenScale() const noexcept;
     [[nodiscard]] Vec2 AvailableSize() const noexcept;
     [[nodiscard]] bool ReadOnly() const noexcept;
     [[nodiscard]] float ToScreen(float logical_size) const noexcept;
@@ -59,6 +65,7 @@ private:
     GraphId m_graph;
     const GraphDocument* m_document;
     const NodeInstance* m_node;
+    float m_ui_scale;
     float m_zoom;
     Vec2 m_available_size;
     CommandSink m_command_sink;
@@ -72,6 +79,61 @@ private:
 // Callbacks must balance their ImGui stacks and queue mutations through NodeUiContext.
 using DrawNodeBodyFn = std::function<void(NodeUiContext&)>;
 using DrawNodeInspectorFn = std::function<void(NodeUiContext&)>;
+
+struct NodeHeaderGlyph final {
+    std::string id;
+};
+
+struct NodeHeaderBadge final {
+    std::string text;
+};
+
+using NodeHeaderItemContent = std::variant<NodeHeaderGlyph, NodeHeaderBadge>;
+
+struct NodeHeaderItem final {
+    std::string id;
+    NodeHeaderItemContent content;
+    std::optional<std::uint32_t> color;
+    bool active{false};
+    bool enabled{true};
+    std::string action;
+    std::string tooltip;
+};
+
+struct NodeHeaderContext final {
+    GraphId graph;
+    const Graph& graph_data;
+    const NodeInstance& node;
+    bool collapsed{false};
+    bool selected{false};
+    float ui_scale{1.0f};
+    float zoom{1.0f};
+};
+
+struct NodeHeaderPresentation final {
+    std::vector<std::string> lines;
+    std::vector<NodeHeaderItem> items;
+    std::optional<std::uint32_t> color;
+};
+
+using ResolveNodeHeaderFn = std::function<NodeHeaderPresentation(const NodeHeaderContext&)>;
+
+struct NodeHeaderGlyphDrawContext final {
+    ImDrawList& draw_list;
+    Vec2 min;
+    Vec2 max;
+    std::uint32_t color{0xFFFFFFFFU};
+    bool active{false};
+    bool enabled{true};
+};
+
+using DrawNodeHeaderGlyphFn = std::function<void(const NodeHeaderGlyphDrawContext&)>;
+
+struct NodeHeaderGlyphDescriptor final {
+    std::string id;
+    float aspect_ratio{1.0f};
+    DrawNodeHeaderGlyphFn draw;
+};
 
 struct PinLabelPlacement final {
     Vec2 offset;
@@ -96,7 +158,7 @@ struct NodeUiLayoutContext final {
     const NodeInstance& node;
     Vec2 node_size;
     bool collapsed{false};
-    float title_height{0.0f};
+    float header_height{0.0f};
     float pin_spacing{0.0f};
 };
 
@@ -107,7 +169,8 @@ struct NodeUiDescriptor final {
     DrawNodeBodyFn draw_body;
     DrawNodeInspectorFn draw_inspector;
     Vec2 default_size; // Full node size in graph logical units.
-    std::uint32_t header_color{0xFF353535U};
+    std::optional<std::uint32_t> header_color;
+    ResolveNodeHeaderFn resolve_header;
     LayoutNodeUiFn layout;
 };
 
@@ -148,6 +211,10 @@ public:
     [[nodiscard]] std::uint64_t Identity() const noexcept;
     [[nodiscard]] std::uint64_t Revision() const noexcept;
     [[nodiscard]] std::uint64_t LayoutRevision() const noexcept;
+
+    [[nodiscard]] Result<void> RegisterHeaderGlyph(NodeHeaderGlyphDescriptor descriptor);
+    [[nodiscard]] bool UnregisterHeaderGlyph(std::string_view id);
+    [[nodiscard]] const NodeHeaderGlyphDescriptor* FindHeaderGlyph(std::string_view id) const noexcept;
 
     [[nodiscard]] Result<void> RegisterPinStyle(TypeId type, PinStyleFn style);
     [[nodiscard]] bool UnregisterPinStyle(const TypeId& type);

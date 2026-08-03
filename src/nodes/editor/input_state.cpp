@@ -10,15 +10,15 @@ namespace Uni::GUI::Nodes::EditorDetail {
 void EditorFrame::UpdateInteraction() {
     if (session.minimap_navigation) {
         session.pan = ClampPan({
-            canvas_size.x * 0.5f - session.minimap_navigation->x * session.zoom,
-            canvas_size.y * 0.5f - session.minimap_navigation->y * session.zoom,
+            canvas_size.x * 0.5f / ui_scale - session.minimap_navigation->x * session.zoom,
+            canvas_size.y * 0.5f / ui_scale - session.minimap_navigation->y * session.zoom,
         });
         session.minimap_navigation.reset();
     }
     if (auto* dragging = std::get_if<DraggingNodes>(&session.interaction)) {
         dragging->delta = {
-            (mouse.x - dragging->start.x) / session.zoom,
-            (mouse.y - dragging->start.y) / session.zoom,
+            (mouse.x - dragging->start.x) / GraphScale(),
+            (mouse.y - dragging->start.y) / GraphScale(),
         };
         if (config.snap_to_grid && !ImGui::GetIO().KeyAlt && !dragging->before.empty()) {
             const auto anchor = std::ranges::min_element(
@@ -39,35 +39,38 @@ void EditorFrame::UpdateInteraction() {
         }
     } else if (auto* group = std::get_if<DraggingGroup>(&session.interaction)) {
         group->delta = {
-            (mouse.x - group->start.x) / session.zoom,
-            (mouse.y - group->start.y) / session.zoom,
+            (mouse.x - group->start.x) / GraphScale(),
+            (mouse.y - group->start.y) / GraphScale(),
         };
         if (config.snap_to_grid && !ImGui::GetIO().KeyAlt) {
             group->delta = Snap(group->before + group->delta, config.snap_size) - group->before;
         }
     } else if (auto* resize = std::get_if<ResizingNode>(&session.interaction)) {
+        const Vec2 minimum_size = MinimumNodeSize();
         resize->current = {
-            std::max(config.minimum_node_size.x,
-                resize->before.x + (mouse.x - resize->start.x) / session.zoom),
-            std::max(config.minimum_node_size.y,
-                resize->before.y + (mouse.y - resize->start.y) / session.zoom),
+            std::max(minimum_size.x,
+                resize->before.x + (mouse.x - resize->start.x) / GraphScale()),
+            std::max(minimum_size.y,
+                resize->before.y + (mouse.y - resize->start.y) / GraphScale()),
         };
         if (config.snap_to_grid && !ImGui::GetIO().KeyAlt) {
             resize->current = Snap(resize->current, config.snap_size);
+            resize->current.x = std::max(resize->current.x, minimum_size.x);
+            resize->current.y = std::max(resize->current.y, minimum_size.y);
         }
     } else if (auto* resize = std::get_if<ResizingGroup>(&session.interaction)) {
         resize->current = {
             std::max(config.minimum_group_size.x,
-                resize->before.x + (mouse.x - resize->start.x) / session.zoom),
+                resize->before.x + (mouse.x - resize->start.x) / GraphScale()),
             std::max(config.minimum_group_size.y,
-                resize->before.y + (mouse.y - resize->start.y) / session.zoom),
+                resize->before.y + (mouse.y - resize->start.y) / GraphScale()),
         };
         if (config.snap_to_grid && !ImGui::GetIO().KeyAlt) {
             resize->current = Snap(resize->current, config.snap_size);
         }
     } else if (std::holds_alternative<Panning>(session.interaction)) {
-        session.pan.x += ImGui::GetIO().MouseDelta.x;
-        session.pan.y += ImGui::GetIO().MouseDelta.y;
+        session.pan.x += ImGui::GetIO().MouseDelta.x / ui_scale;
+        session.pan.y += ImGui::GetIO().MouseDelta.y / ui_scale;
     }
     session.pan = ClampPan(session.pan);
 }
@@ -76,6 +79,15 @@ void EditorFrame::ProcessGestures() {
     auto& cache = session.geometry;
     const auto& resolved_nodes = cache.resolved_nodes;
     const bool body_hovered = hovered_node && hovered_bodies.contains(hovered_node);
+    bool actionable_header_hovered = false;
+    if (hovered_header_item) {
+        const auto& geometry = header_item_geometry[*hovered_header_item];
+        const auto header = node_headers.find(geometry.node);
+        if (header != node_headers.end() && geometry.item_index < header->second.items.size()) {
+            const auto& item = header->second.items[geometry.item_index];
+            actionable_header_hovered = item.enabled && !item.action.empty();
+        }
+    }
     append_selection = ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift;
     if (std::holds_alternative<Idle>(session.interaction) && canvas_hovered && !minimap_hovered &&
         !PointerOverUiBody() && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
@@ -88,7 +100,7 @@ void EditorFrame::ProcessGestures() {
 
     const bool node_activated = std::holds_alternative<Idle>(session.interaction) && canvas_hovered &&
         !minimap_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && hovered_node &&
-        !body_hovered && !hovered_node_collapse && !hovered_node_resize;
+        !body_hovered && !actionable_header_hovered && !hovered_node_collapse && !hovered_node_resize;
     if (node_activated) {
         result.activated_node = hovered_node;
         const auto* activated = document.FindNode(graph_id, hovered_node);
@@ -126,7 +138,16 @@ void EditorFrame::ProcessGestures() {
 
     if (std::holds_alternative<Idle>(session.interaction) && canvas_hovered && !minimap_hovered &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !inserted_route_point && !node_activated) {
-        if (body_hovered) {
+        if (actionable_header_hovered) {
+            const auto& geometry = header_item_geometry[*hovered_header_item];
+            const auto header = node_headers.find(geometry.node);
+            if (header != node_headers.end() && geometry.item_index < header->second.items.size()) {
+                const auto& item = header->second.items[geometry.item_index];
+                if (item.enabled && !item.action.empty()) {
+                    result.header_actions.push_back({graph_id, geometry.node, item.id, item.action});
+                }
+            }
+        } else if (body_hovered) {
             if (!append_selection) {
                 result.selection_changed |= SelectOnly(session.selected_nodes, hovered_node, false);
                 result.selection_changed |= !session.selected_links.empty() || !session.selected_groups.empty() ||
@@ -165,8 +186,8 @@ void EditorFrame::ProcessGestures() {
         } else if (hovered_node && hovered_node_resize) {
             const auto geometry = std::ranges::find(node_geometry, hovered_node, &NodeGeometry::id);
             const Vec2 size{
-                (geometry->max.x - geometry->min.x) / session.zoom,
-                (geometry->max.y - geometry->min.y) / session.zoom,
+                (geometry->max.x - geometry->min.x) / GraphScale(),
+                (geometry->max.y - geometry->min.y) / GraphScale(),
             };
             session.interaction = ResizingNode{hovered_node, mouse, size, size};
         } else if (hovered_node) {
@@ -373,8 +394,9 @@ void EditorFrame::ProcessGestures() {
 
     if (auto* resizing = std::get_if<ResizingNode>(&session.interaction);
         resizing != nullptr && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        resizing->current.x = std::max(resizing->current.x, config.minimum_node_size.x);
-        resizing->current.y = std::max(resizing->current.y, config.minimum_node_size.y);
+        const Vec2 minimum_size = MinimumNodeSize();
+        resizing->current.x = std::max(resizing->current.x, minimum_size.x);
+        resizing->current.y = std::max(resizing->current.y, minimum_size.y);
         auto resized = commands.Execute(
             std::make_unique<ResizeNodeCommand>(resizing->node, resizing->current),
             document, presentation, registry, policy);

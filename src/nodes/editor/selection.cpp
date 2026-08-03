@@ -1,6 +1,7 @@
 #include "internal.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace Uni::GUI::Nodes {
 
@@ -11,6 +12,7 @@ void EditorContext::ClearSelection() noexcept {
     state.selected_groups.clear();
     state.selected_route_points.clear();
     state.selection_graph = state.active_graph.value_or(GraphId{});
+    if (state.external_revision != std::numeric_limits<std::uint64_t>::max()) ++state.external_revision;
 }
 
 void EditorContext::SetSelection(GraphSelection selection) {

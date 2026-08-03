@@ -97,11 +97,28 @@ struct EditorStyle final {
     float node_border_width{1.0f};
     float link_width{3.0f};
     float pin_radius{5.0f};
-    float handle_size{10.0f};
+    float resize_handle_size{10.0f};
+    float route_point_radius{5.0f};
     float link_flow_marker_radius{4.0f};
     float link_flow_outline_width{1.5f};
     float debug_line_width{1.0f};
     float debug_pin_normal_length{24.0f};
+};
+
+struct NodeHeaderLayout final {
+    std::uint8_t maximum_text_lines{1};
+    float minimum_height{28.0f};
+    float horizontal_padding{10.0f};
+    float vertical_padding{6.0f};
+    float line_spacing{2.0f};
+    float primary_text_scale{1.0f};
+    float secondary_text_scale{0.8f};
+    float item_height{14.0f};
+    float item_spacing{6.0f};
+    float collapse_width{24.0f};
+    float minimum_text_width{24.0f};
+
+    bool operator==(const NodeHeaderLayout&) const = default;
 };
 
 struct EditorConfig final {
@@ -110,7 +127,7 @@ struct EditorConfig final {
     float zoom_step{1.15f};
     float grid_size{32.0f};
     float node_width{190.0f};
-    float title_height{28.0f};
+    NodeHeaderLayout node_header;
     float pin_spacing{24.0f};
     float link_hit_radius{8.0f};
     float link_flatten_tolerance{0.5f};
@@ -129,6 +146,7 @@ struct EditorConfig final {
     bool snap_to_grid{true};
     bool enable_shortcuts{true};
     bool enable_node_popup{true};
+    bool enable_node_collapse{true};
     bool show_breadcrumbs{true};
 };
 
@@ -186,6 +204,7 @@ private:
 };
 
 using DrawEditorContextMenuFn = std::function<void(EditorMenuContext&)>;
+using DuplicateSelectionFn = std::function<void(const GraphSelection&)>;
 
 struct ResolvedGraphAsset final {
     GraphAssetId asset;
@@ -208,7 +227,15 @@ struct GraphAssetNavigation final {
 
 struct EditorCallbacks final {
     DrawEditorContextMenuFn draw_context_menu;
+    DuplicateSelectionFn duplicate_selection;
     GraphDocumentResolver resolve_graph_asset;
+};
+
+struct NodeHeaderAction final {
+    GraphId graph;
+    NodeId node;
+    std::string item;
+    std::string action;
 };
 
 struct EditorResult final {
@@ -221,6 +248,7 @@ struct EditorResult final {
     GraphId active_graph;
     bool active_graph_changed{false};
     GraphSelection selection;
+    std::vector<NodeHeaderAction> header_actions;
 };
 
 struct Breadcrumb final {
@@ -249,6 +277,7 @@ public:
     EditorContext& operator=(const EditorContext&) = delete;
     void Swap(EditorContext& other) noexcept;
 
+    // Pan uses reference UI units; node and route geometry use graph units.
     void SetPan(Vec2 pan) noexcept;
     [[nodiscard]] Vec2 Pan() const noexcept;
     void SetZoom(float zoom) noexcept;
