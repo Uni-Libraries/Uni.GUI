@@ -94,6 +94,18 @@ public:
         return m_registry.ReplaceNodeType(std::move(descriptor));
     }
 
+    [[nodiscard]] Result<void> SetTypeCompatibility(TypeCompatibilityFn compatibility) {
+        if (m_loading) return LoadingError<void>();
+        if (commands.IsBusy()) return BusyRegistryError<void>();
+        return m_registry.SetTypeCompatibility(std::move(compatibility));
+    }
+
+    [[nodiscard]] Result<void> ClearTypeCompatibility() {
+        if (m_loading) return LoadingError<void>();
+        if (commands.IsBusy()) return BusyRegistryError<void>();
+        return m_registry.ClearTypeCompatibility();
+    }
+
     [[nodiscard]] Result<NodeCreation> InstantiateNode(
         const TypeId& type,
         const std::string_view display_name = {}) {

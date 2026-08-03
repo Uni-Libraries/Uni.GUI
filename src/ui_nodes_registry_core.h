@@ -42,6 +42,7 @@ using RegistryReverseMap =
 struct RegistryState final {
   RegistryDescriptorMap descriptors;
   RegistryConversionMap conversions;
+  std::shared_ptr<const TypeCompatibilityFn> type_compatibility;
   RegistryRegistrationMap registrations;
   RegistryReverseMap registrations_by_node_type;
   std::uint64_t node_revision{0};
@@ -100,12 +101,14 @@ struct RegistryDependencyRecorder final {
       conversions;
   RegistryDescriptorMap descriptor_root;
   RegistryConversionMap conversion_root;
+  std::shared_ptr<const TypeCompatibilityFn> type_compatibility;
   std::shared_ptr<const RegistryState> generation_root;
   std::uint64_t node_revision{0};
   std::uint64_t conversion_revision{0};
   std::uint64_t generation{0};
   bool reads_descriptor_root{false};
   bool reads_conversion_root{false};
+  bool reads_type_compatibility{false};
   bool reads_node_revision{false};
   bool reads_conversion_revision{false};
   bool reads_generation{false};
@@ -270,21 +273,86 @@ ConnectionResult RegistrySnapshot::Check(const TypeId &output,
     return Rejected("Pins must have registered value types");
   if (!ValidKind(kind))
     return Rejected("Pin kind is invalid");
-  if (output == input || output.Value() == "*" || input.Value() == "*") {
+  const auto built_in_compatible = [](const TypeId &source,
+                                      const TypeId &destination) {
+    if (source == destination || source.Value() == "*" ||
+        destination.Value() == "*")
+      return true;
+    return false;
+  };
+  if (built_in_compatible(output, input)) {
     return ConnectionResult{ConnectionResult::Status::Allowed,
                             {},
                             std::nullopt,
                             ErrorCode::IncompatiblePins};
   }
 
+  const auto compatibility =
+      m_state != nullptr ? m_state->type_compatibility : nullptr;
+  if (m_dependencies != nullptr && !m_dependencies->sealed) {
+    m_dependencies->type_compatibility = compatibility;
+    m_dependencies->reads_type_compatibility = true;
+  }
+  bool compatibility_failed = false;
+  const auto compatible = [&](const TypeId &source, const TypeId &destination) {
+    if (built_in_compatible(source, destination))
+      return true;
+    if (!compatibility)
+      return false;
+    try {
+      return (*compatibility)(source, destination, kind);
+    } catch (...) {
+      compatibility_failed = true;
+      return false;
+    }
+  };
+  if (compatible(output, input)) {
+    return ConnectionResult{ConnectionResult::Status::Allowed,
+                            {},
+                            std::nullopt,
+                            ErrorCode::IncompatiblePins};
+  }
+  if (compatibility_failed)
+    return Rejected("Type compatibility policy failed");
+
   const ConversionKey key{output, input, kind};
   ConversionRecipe recipe;
   if (m_state != nullptr) {
     if (const auto *found = m_state->conversions.Find(key))
       recipe = *found;
+    if (recipe) {
+      if (m_dependencies != nullptr && !m_dependencies->sealed)
+        m_dependencies->conversions.insert_or_assign(key, recipe);
+    } else if (compatibility) {
+      if (m_dependencies != nullptr && !m_dependencies->sealed) {
+        m_dependencies->conversion_root = m_state->conversions;
+        m_dependencies->reads_conversion_root = true;
+      }
+      for (const auto &candidate : m_state->conversions) {
+        const auto &descriptor = candidate.Descriptor();
+        if (descriptor.key.kind != kind)
+          continue;
+        if (!compatible(output, descriptor.key.source_type)) {
+          if (compatibility_failed)
+            return Rejected("Type compatibility policy failed");
+          continue;
+        }
+        if (!compatible(descriptor.key.destination_type, input)) {
+          if (compatibility_failed)
+            return Rejected("Type compatibility policy failed");
+          continue;
+        }
+        if (recipe) {
+          return Rejected("Multiple conversions can satisfy the connection");
+        }
+        recipe = candidate;
+      }
+      if (compatibility_failed)
+        return Rejected("Type compatibility policy failed");
+    } else if (m_dependencies != nullptr && !m_dependencies->sealed) {
+      m_dependencies->conversions.insert_or_assign(key, ConversionRecipe{});
+    }
   }
-  if (m_dependencies != nullptr && !m_dependencies->sealed)
-    m_dependencies->conversions.insert_or_assign(key, recipe);
   if (recipe) {
     return ConnectionResult{ConnectionResult::Status::RequiresConversion,
                             "Connection requires conversion from '" +
@@ -515,6 +583,35 @@ Result<void> RegistryCatalog::ReplaceNodeType(NodeTypeDescriptor descriptor) {
                    : std::unexpected(std::move(committed.error()));
 }
 
+Result<void>
+RegistryCatalog::SetTypeCompatibility(TypeCompatibilityFn compatibility) {
+  if (!compatibility)
+    return ClearTypeCompatibility();
+  auto update = BeginUpdate();
+  if (!update)
+    return std::unexpected(std::move(update.error()));
+  if (auto staged = update->SetTypeCompatibility(std::move(compatibility));
+      !staged) {
+    return staged;
+  }
+  auto committed = update->Commit();
+  return committed ? Result<void>{}
+                   : std::unexpected(std::move(committed.error()));
+}
+
+Result<void> RegistryCatalog::ClearTypeCompatibility() {
+  if (!m_impl->owner->state->type_compatibility)
+    return {};
+  auto update = BeginUpdate();
+  if (!update)
+    return std::unexpected(std::move(update.error()));
+  if (auto staged = update->ClearTypeCompatibility(); !staged)
+    return staged;
+  auto committed = update->Commit();
+  return committed ? Result<void>{}
+                   : std::unexpected(std::move(committed.error()));
+}
+
 Result<bool> RegistryCatalog::UnregisterNodeType(const TypeId &type) {
   if (!m_impl->owner->state->descriptors.contains(type))
     return false;
@@ -625,6 +722,8 @@ struct RegistryUpdate::Impl final {
   std::shared_ptr<const Detail::RegistryState> base;
   std::vector<NodeOperation> node_operations;
   std::vector<ConversionOperation> conversion_operations;
+  TypeCompatibilityFn type_compatibility;
+  bool type_compatibility_staged{false};
   std::optional<Error> error;
   bool finished{false};
 };
@@ -755,6 +854,19 @@ RegistryUpdate::UnregisterConversion(ConversionRegistrationToken registration) {
   return {};
 }
 
+Result<void>
+RegistryUpdate::SetTypeCompatibility(TypeCompatibilityFn compatibility) {
+  if (auto active = StageRegistryOperation(m_impl.get()); !active)
+    return active;
+  m_impl->type_compatibility = std::move(compatibility);
+  m_impl->type_compatibility_staged = true;
+  return {};
+}
+
+Result<void> RegistryUpdate::ClearTypeCompatibility() {
+  return SetTypeCompatibility({});
+}
+
 Result<RegistryUpdateResult> RegistryUpdate::Commit() {
   if (m_impl == nullptr || m_impl->finished) {
     return std::unexpected(MakeError(ErrorCode::CommandFailed,
@@ -779,7 +891,9 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
       .node_revision = m_impl->base->node_revision,
       .conversion_revision = m_impl->base->conversion_revision,
   };
-  if (m_impl->node_operations.empty() && m_impl->conversion_operations.empty())
+  if (m_impl->node_operations.empty() &&
+      m_impl->conversion_operations.empty() &&
+      !m_impl->type_compatibility_staged)
     return result;
 
   Detail::RegistryState candidate = *m_impl->base;
@@ -1159,6 +1273,21 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
     }
   }
 
+  if (m_impl->type_compatibility_staged) {
+    ++result.statistics.touched_records;
+    if (!m_impl->type_compatibility &&
+        !m_impl->base->type_compatibility) {
+      ++result.statistics.no_op_records;
+    } else {
+      candidate.type_compatibility =
+          m_impl->type_compatibility
+              ? std::make_shared<const TypeCompatibilityFn>(
+                    std::move(m_impl->type_compatibility))
+              : nullptr;
+      conversion_changed = true;
+    }
+  }
+
   if (!node_changed)
     candidate.descriptors = m_impl->base->descriptors;
   if (!conversion_changed) {
@@ -1234,8 +1363,7 @@ bool Detail::RegistryAccess::DependenciesCurrent(
        index < snapshot.m_dependencies->node_dependency_count; ++index) {
     const auto &dependency = snapshot.m_dependencies->node_dependencies[index];
     if (dependency.expected) {
-      const auto *found =
-          current.descriptors.Find(dependency.expected->type);
+      const auto *found = current.descriptors.Find(dependency.expected->type);
       if (found == nullptr || *found != dependency.expected)
         return false;
       continue;
@@ -1262,6 +1390,16 @@ bool Detail::RegistryAccess::DependenciesCurrent(
   if (snapshot.m_dependencies->reads_descriptor_root &&
       !current.descriptors.SharesStorageWith(
           snapshot.m_dependencies->descriptor_root)) {
+    return false;
+  }
+  if (snapshot.m_dependencies->reads_conversion_root &&
+      !current.conversions.SharesStorageWith(
+          snapshot.m_dependencies->conversion_root)) {
+    return false;
+  }
+  if (snapshot.m_dependencies->reads_type_compatibility &&
+      current.type_compatibility !=
+          snapshot.m_dependencies->type_compatibility) {
     return false;
   }
   if (snapshot.m_dependencies->reads_node_revision &&

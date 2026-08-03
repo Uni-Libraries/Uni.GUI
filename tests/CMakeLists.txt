@@ -39,6 +39,15 @@ target_link_libraries(unigui_nodes_tests PRIVATE UniGUI::UniGUI)
 set_target_properties(unigui_nodes_tests PROPERTIES CXX_EXTENSIONS OFF)
 add_test(NAME unigui.nodes COMMAND unigui_nodes_tests)
 
+add_executable(unigui_nodes_type_compatibility_tests
+    ui_nodes_type_compatibility_tests.cpp
+)
+target_compile_features(unigui_nodes_type_compatibility_tests PRIVATE cxx_std_23)
+target_include_directories(unigui_nodes_type_compatibility_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(unigui_nodes_type_compatibility_tests PRIVATE UniGUI::UniGUI)
+set_target_properties(unigui_nodes_type_compatibility_tests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME unigui.nodes-type-compatibility COMMAND unigui_nodes_type_compatibility_tests)
+
 add_executable(unigui_nodes_state_machine_tests ui_nodes_state_machine_tests.cpp)
 target_compile_features(unigui_nodes_state_machine_tests PRIVATE cxx_std_23)
 target_link_libraries(unigui_nodes_state_machine_tests PRIVATE UniGUI::UniGUI)

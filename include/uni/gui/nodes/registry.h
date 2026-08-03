@@ -64,6 +64,9 @@ struct NodeBehavior final {
 
 using NodeBehaviorPtr = std::shared_ptr<const NodeBehavior>;
 
+using TypeCompatibilityFn = std::function<bool(
+    const TypeId &output, const TypeId &input, PinKind kind)>;
+
 enum class PropertyImpact : std::uint8_t {
   RuntimeOnly,
   Rendering,
@@ -247,6 +250,9 @@ public:
                     ConversionDescriptor descriptor);
   [[nodiscard]] Result<void>
   UnregisterConversion(ConversionRegistrationToken registration);
+  [[nodiscard]] Result<void>
+  SetTypeCompatibility(TypeCompatibilityFn compatibility);
+  [[nodiscard]] Result<void> ClearTypeCompatibility();
   [[nodiscard]] Result<RegistryUpdateResult> Commit();
 
 private:
@@ -270,6 +276,9 @@ public:
 
   [[nodiscard]] Result<void> RegisterNodeType(NodeTypeDescriptor descriptor);
   [[nodiscard]] Result<void> ReplaceNodeType(NodeTypeDescriptor descriptor);
+  [[nodiscard]] Result<void>
+  SetTypeCompatibility(TypeCompatibilityFn compatibility);
+  [[nodiscard]] Result<void> ClearTypeCompatibility();
   [[nodiscard]] Result<bool> UnregisterNodeType(const TypeId &type);
   [[nodiscard]] Result<ConversionRegistrationToken>
   RegisterConversion(ConversionDescriptor descriptor);
