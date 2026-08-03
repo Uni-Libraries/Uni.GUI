@@ -4,11 +4,11 @@ project(UniGUIPackageConsumer LANGUAGES CXX)
 
 include(CTest)
 
-find_package(UniGUI 1.0 CONFIG REQUIRED)
-find_package(UniGUI 1.0.0 EXACT CONFIG REQUIRED)
+find_package(UniGUI 2.0 CONFIG REQUIRED)
+find_package(UniGUI 2.0.0 EXACT CONFIG REQUIRED)
 
-if(NOT UniGUI_VERSION STREQUAL "1.0.0" OR
-   NOT UniGUI_ABI_VERSION STREQUAL "1")
+if(NOT UniGUI_VERSION STREQUAL "2.0.0" OR
+   NOT UniGUI_ABI_VERSION STREQUAL "2")
     message(FATAL_ERROR
         "Unexpected installed package metadata: version=${UniGUI_VERSION}, "
         "ABI=${UniGUI_ABI_VERSION}")
@@ -38,6 +38,7 @@ add_library(unigui_package_headers OBJECT
     header_ui_callbacks.cpp
     header_ui_config.cpp
     header_ui_dispatcher.cpp
+    header_ui_display.cpp
     header_ui_element.cpp
     header_ui_error.cpp
     header_ui_event.cpp

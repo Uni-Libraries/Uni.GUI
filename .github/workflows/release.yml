@@ -11,7 +11,7 @@ env:
   VCPKG_COMMIT_ID: 1600ce2ba1b6b621bfc5a31a785c4963b817a1c7
   SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
   SDL_PREFIX: ${{ github.workspace }}/../sdl3
-  ABI_MAJOR: 1
+  ABI_MAJOR: 2
 
 jobs:
   release-metadata:

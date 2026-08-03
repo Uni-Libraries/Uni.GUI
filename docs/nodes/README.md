@@ -15,7 +15,7 @@ Use the umbrella header for the complete API:
 Link the regular UniGUI package target:
 
 ```cmake
-find_package(UniGUI 1.0 CONFIG REQUIRED)
+find_package(UniGUI 2.0 CONFIG REQUIRED)
 target_link_libraries(my_node_editor PRIVATE UniGUI::UniGUI)
 ```
 

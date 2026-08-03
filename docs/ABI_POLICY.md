@@ -2,7 +2,7 @@
 
 ## Current Stability
 
-Release `1.0.0` establishes stable ABI major `1`. Within the supported compiler, standard-library, runtime, architecture, and build-mode family, later `1.x` releases preserve the public binary interfaces documented here. An incompatible public ABI change requires a new major release.
+Release `2.0.0` establishes stable ABI major `2`. Within the supported compiler, standard-library, runtime, architecture, and build-mode family, later `2.x` releases preserve the public binary interfaces documented here. An incompatible public ABI change requires a new major release.
 
 ## Binary Boundary
 
@@ -26,7 +26,7 @@ Dear ImGui Test Engine is test-only. Its definitions and symbols are not linked 
 
 Incompatible ABI changes require a major version increment. Minor and patch releases preserve ABI within the same compiler/runtime family and may add backward-compatible APIs.
 
-The UniGUI, bundled Dear ImGui, and bundled ImPlot shared targets use the package major as their loader identity; for release `1.0.0`, SOVERSION is `1`. On ELF platforms, the core shared library ELF symbol version node is `UNIGUI_1` and remains unchanged throughout compatible `1.x` releases. Windows DLL and import-library names carry the same ABI major. The CMake package version uses `SameMajorVersion`: a newer `1.x` package can satisfy a `1.0` request, while a `2.x` package cannot.
+The UniGUI, bundled Dear ImGui, and bundled ImPlot shared targets use the package major as their loader identity; for release `2.0.0`, SOVERSION is `2`. On ELF platforms, the core shared library ELF symbol version node is `UNIGUI_2` and remains unchanged throughout compatible `2.x` releases. Windows DLL and import-library names carry the same ABI major. The CMake package version uses `SameMajorVersion`: a newer `2.x` package can satisfy a `2.0` request, while a different major cannot.
 
 Linux builds always test built and installed SONAMEs and the core ELF version node when shared libraries are enabled. The ABI lane captures ABIXML and exported-symbol manifests for all three DSOs. Once a release baseline exists, `UNIGUI_ENABLE_ABI_BASELINE_CHECK=ON` and `UNIGUI_ABI_BASELINE_DIR` make removal or incompatible mutation of that released surface a blocking test. Release artifacts contain provenance-attested baselines; no synthetic or unreviewed baseline is accepted as release evidence.
 
@@ -47,7 +47,7 @@ SDL 3.4 or newer remains an external CMake package dependency. Exported targets 
 The supported binary consumption path is:
 
 ```cmake
-find_package(UniGUI 1.0 CONFIG REQUIRED)
+find_package(UniGUI 2.0 CONFIG REQUIRED)
 target_link_libraries(application PRIVATE UniGUI::UniGUI)
 ```
 

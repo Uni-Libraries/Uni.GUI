@@ -153,19 +153,22 @@ if(UNIGUI_INSTALL)
 
     set(unigui_current_version_file "${PROJECT_BINARY_DIR}/UniGUIConfigVersion.cmake")
     unigui_add_package_version_test(
-        unigui.package-version.minimum-1.0
-        "${unigui_current_version_file}" 1.0 "${UNIGUI_VERSION}" ON OFF)
+        unigui.package-version.minimum-2.0
+        "${unigui_current_version_file}" 2.0 "${UNIGUI_VERSION}" ON OFF)
     unigui_add_package_version_test(
-        unigui.package-version.exact-1.0.0
-        "${unigui_current_version_file}" 1.0.0 "${UNIGUI_VERSION}" ON ON)
+        unigui.package-version.exact-2.0.0
+        "${unigui_current_version_file}" 2.0.0 "${UNIGUI_VERSION}" ON ON)
     unigui_add_package_version_test(
-        unigui.package-version.reject-newer-1.0.1
-        "${unigui_current_version_file}" 1.0.1 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-newer-2.0.1
+        "${unigui_current_version_file}" 2.0.1 "${UNIGUI_VERSION}" OFF OFF)
     unigui_add_package_version_test(
-        unigui.package-version.reject-major-2
-        "${unigui_current_version_file}" 2.0.0 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-major-1
+        "${unigui_current_version_file}" 1.0.0 "${UNIGUI_VERSION}" OFF OFF)
+    unigui_add_package_version_test(
+        unigui.package-version.reject-major-3
+        "${unigui_current_version_file}" 3.0.0 "${UNIGUI_VERSION}" OFF OFF)
 
-    foreach(synthetic_version IN ITEMS 1.0.1 1.1.0 2.0.0)
+    foreach(synthetic_version IN ITEMS 2.0.1 2.1.0 3.0.0)
         set(synthetic_version_file
             "${CMAKE_CURRENT_BINARY_DIR}/UniGUIConfigVersion-${synthetic_version}.cmake")
         write_basic_package_version_file(
@@ -173,14 +176,14 @@ if(UNIGUI_INSTALL)
             VERSION "${synthetic_version}"
             COMPATIBILITY SameMajorVersion
         )
-        if(synthetic_version MATCHES "^1\\.")
+        if(synthetic_version MATCHES "^2\\.")
             set(expect_compatible ON)
         else()
             set(expect_compatible OFF)
         endif()
         unigui_add_package_version_test(
             "unigui.package-version.synthetic-${synthetic_version}"
-            "${synthetic_version_file}" 1.0.0 "${synthetic_version}"
+            "${synthetic_version_file}" 2.0.0 "${synthetic_version}"
             "${expect_compatible}" OFF)
     endforeach()
 endif()
