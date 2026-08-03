@@ -2,6 +2,7 @@
 
 #include <uni/gui/asset.h>
 #include <uni/gui/dispatcher.h>
+#include <uni/gui/display.h>
 #include <uni/gui/event.h>
 #include <uni/gui/frame.h>
 #include <uni/gui/layout.h>
@@ -30,15 +31,8 @@ enum class UiVsyncMode {
 
 struct UiFontConfig final {
     std::string path;
-    float size_pixels{12.0f};
-    UiGlyphRange glyph_range{UiGlyphRange::Cyrillic};
-};
-
-struct UiDpiConfig final {
-    bool high_density_window{true};
-    bool scale_style{true};
-    bool scale_fonts{true};
-    bool scale_viewports{true};
+    float size{16.0f};
+    UiGlyphRange glyph_range{UiGlyphRange::Default};
 };
 
 struct UiPersistenceConfig final {
@@ -56,7 +50,7 @@ struct UiAppConfig final {
     UiFeaturePolicy viewports{UiFeaturePolicy::IfSupported};
     UiVsyncMode vsync{UiVsyncMode::Enabled};
     UiFontConfig font;
-    UiDpiConfig dpi;
+    UiScalingConfig scaling;
     UiPersistenceConfig persistence;
     UiFramePolicy frame_policy;
     UiCommandQueueConfig command_queue;

@@ -48,6 +48,10 @@ public:
 
     [[nodiscard]] UiResult<UiTexture> CreateTexture(int width, int height);
     [[nodiscard]] UiResult<void> SetVsync(UiVsyncMode mode);
+    [[nodiscard]] UiResult<void> SetWindowTitle(std::string title);
+    [[nodiscard]] UiResult<UiDisplayMetrics> DisplayMetrics() const;
+    [[nodiscard]] UiResult<void> SetUserScale(float scale);
+    [[nodiscard]] UiResult<void> SetReferenceStyle(const ImGuiStyle& style);
 
     [[nodiscard]] UiResult<void> DefineDockLayout(UiDockLayout layout);
     [[nodiscard]] UiResult<bool> RemoveDockLayout(std::string_view id);

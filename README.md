@@ -105,6 +105,7 @@ Nodes documentation:
 - [Custom nodes, UI, and converters](docs/nodes/custom_nodes.md)
 - [Commands, transactions, and undo](docs/nodes/commands_and_transactions.md)
 - [Persistence and migrations](docs/nodes/persistence.md)
+- [Display scaling](docs/display_scaling.md)
 
 Mutable Nodes objects and callbacks follow the UniGUI main-thread contract. Capture `GraphDocumentSnapshot` on the UI thread for const worker reads, and marshal mutations through `UiDispatcher`; see [threading and callback contracts](docs/nodes/threading_and_callbacks.md).
 
@@ -120,12 +121,11 @@ config.initial_height = 900;
 config.renderer = Uni::GUI::UiRendererPreference::Automatic;
 config.viewports = Uni::GUI::UiFeaturePolicy::IfSupported;
 config.vsync = Uni::GUI::UiVsyncMode::Enabled;
-config.font.size_pixels = 14.0f;
-config.font.glyph_range = Uni::GUI::UiGlyphRange::Cyrillic;
-config.dpi.high_density_window = true;
-config.dpi.scale_style = true;
-config.dpi.scale_fonts = true;
-config.dpi.scale_viewports = true;
+config.font.size = 16.0f;
+config.font.glyph_range = Uni::GUI::UiGlyphRange::Default;
+config.scaling.high_pixel_density = true;
+config.scaling.mode = Uni::GUI::UiScaleMode::Automatic;
+config.scaling.user_scale = 1.0f;
 config.persistence.enabled = true;
 config.persistence.path = "engineering-tool.settings";
 config.persistence.save_debounce = std::chrono::milliseconds{750};
@@ -156,6 +156,8 @@ Viewport policies:
 - `Required`: fail initialization if support is unavailable.
 
 An empty font path selects the embedded Roboto Medium font. A non-empty path is loaded through `AddFontFromFileTTF()`.
+
+Window dimensions and font size use reference UI units. High-density framebuffer allocation, automatic/fixed/manual UI scaling, and the runtime display metrics API are documented in [display scaling](docs/display_scaling.md).
 
 ## Errors And Lifecycle
 

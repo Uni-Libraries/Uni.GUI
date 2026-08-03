@@ -12,6 +12,16 @@ target_link_libraries(unigui_app_tests PRIVATE UniGUI::UniGUI)
 set_target_properties(unigui_app_tests PROPERTIES CXX_EXTENSIONS OFF)
 add_test(NAME unigui.app COMMAND unigui_app_tests)
 
+add_executable(unigui_display_scale_tests
+    ui_display_scale_tests.cpp
+    "${PROJECT_SOURCE_DIR}/src/ui_scale.cpp"
+)
+target_compile_features(unigui_display_scale_tests PRIVATE cxx_std_23)
+target_include_directories(unigui_display_scale_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_link_libraries(unigui_display_scale_tests PRIVATE UniGUI::UniGUI)
+set_target_properties(unigui_display_scale_tests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME unigui.display-scale COMMAND unigui_display_scale_tests)
+
 add_executable(unigui_element_registry_tests
     ui_element_registry_tests.cpp
     "${PROJECT_SOURCE_DIR}/src/ui_element_registry.cpp"
@@ -248,6 +258,7 @@ add_library(unigui_public_header_tests OBJECT
     package/header_ui_callbacks.cpp
     package/header_ui_config.cpp
     package/header_ui_dispatcher.cpp
+    package/header_ui_display.cpp
     package/header_ui_element.cpp
     package/header_ui_error.cpp
     package/header_ui_event.cpp

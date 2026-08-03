@@ -19,6 +19,8 @@ enum class UiEventAction {
 struct UiEventContext final {
     UiApp& app;
     const SDL_Event& event;
+    bool application_quit_requested{};
+    bool main_window_close_requested{};
     UiEventAction current_action{UiEventAction::Pass};
     bool delivered_to_imgui{};
     bool recognized_by_imgui{};

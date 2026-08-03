@@ -189,6 +189,19 @@ int main() {
     Expect(initialized.has_value(), initialized ? "" : initialized.error().message.c_str());
     Expect(app.State() == UiLifecycleState::Ready, "Initialized application must be ready");
     Expect(!app.RendererName().empty(), "Initialized application must expose renderer name");
+    Expect(app.SetWindowTitle("Updated runtime test title").has_value(), "Ready application must update its main window title");
+    Expect(app.SetWindowTitle({}).has_value(), "An empty main-window title must be supported");
+    const auto display_metrics = app.DisplayMetrics();
+    Expect(display_metrics && display_metrics->window_size.width > 0 &&
+               display_metrics->window_size.height > 0 && display_metrics->framebuffer_size.width > 0 &&
+               display_metrics->framebuffer_size.height > 0 && display_metrics->display_scale > 0.0f &&
+               display_metrics->pixel_density > 0.0f && display_metrics->effective_ui_scale > 0.0f,
+           "Ready application must expose valid display metrics");
+    Expect(app.SetUserScale(1.25f).has_value(), "Ready application must update its user UI scale");
+    const auto scaled_metrics = app.DisplayMetrics();
+    Expect(scaled_metrics && scaled_metrics->revision > display_metrics->revision &&
+               scaled_metrics->effective_ui_scale > display_metrics->effective_ui_scale,
+           "Runtime UI scale changes must publish a new display-metrics revision");
 
     int child_updates = 0;
     auto root = app.AddElement(std::make_unique<RootElement>(child_updates));
@@ -365,9 +378,13 @@ int main() {
            "Nested command must execute on the following tick");
 
     std::vector<int> event_order;
+    bool quit_event_identified = false;
+    bool main_window_close_identified = false;
     UiEventHooks hooks;
     hooks.before_imgui = [&](UiEventContext& context) -> UiResult<UiEventAction> {
         event_order.push_back(1);
+        quit_event_identified = context.application_quit_requested;
+        main_window_close_identified = context.main_window_close_requested;
         return context.event.type == SDL_EVENT_QUIT ? UiEventAction::Consume : UiEventAction::Pass;
     };
     hooks.after_imgui = [&](UiEventContext& context) -> UiResult<UiEventAction> {
@@ -379,7 +396,9 @@ int main() {
     close_event.type = SDL_EVENT_QUIT;
     auto consumed_close = dispatcher_app.DispatchEvent(close_event);
     Expect(consumed_close && consumed_close->consumed && !consumed_close->exit_requested,
-           "Pre-hook must be able to consume a close event");
+            "Pre-hook must be able to consume a close event");
+    Expect(quit_event_identified && !main_window_close_identified,
+           "Event context must distinguish application quit from a main-window close request");
     Expect(event_order == std::vector<int>({1, 3}), "Consumed event hook ordering must be deterministic");
 
     bool before_shutdown_rejected = false;

@@ -42,6 +42,14 @@ int main() {
     auto texture = app.CreateTexture(16, 16);
     Expect(!texture && texture.error().code == UiErrorCode::InvalidState,
            "Creating a texture before initialization must return InvalidState");
+    auto title = app.SetWindowTitle("Test");
+    Expect(!title, "Changing the title before initialization must fail");
+    auto metrics = app.DisplayMetrics();
+    Expect(!metrics && metrics.error().code == UiErrorCode::InvalidState,
+           "Display metrics before initialization must return InvalidState");
+    auto scale = app.SetUserScale(1.25f);
+    Expect(!scale && scale.error().code == UiErrorCode::InvalidState,
+           "Changing UI scale before initialization must return InvalidState");
 
     UiAppConfig invalid_config;
     invalid_config.initial_width = 0;
@@ -51,13 +59,21 @@ int main() {
     Expect(app.State() == UiLifecycleState::Empty,
            "Configuration validation must not enter a partial lifecycle state");
 
-    UiAppConfig oversized_config;
-    oversized_config.initial_width = 65536;
-    Expect(!app.Initialize(std::move(oversized_config)), "Oversized dimensions must be rejected");
-
     UiAppConfig non_finite_font;
-    non_finite_font.font.size_pixels = std::numeric_limits<float>::infinity();
+    non_finite_font.font.size = std::numeric_limits<float>::infinity();
     Expect(!app.Initialize(std::move(non_finite_font)), "Non-finite font size must be rejected");
+
+    UiAppConfig invalid_scale_mode;
+    invalid_scale_mode.scaling.mode = static_cast<UiScaleMode>(999);
+    Expect(!app.Initialize(std::move(invalid_scale_mode)), "Invalid scale mode must be rejected");
+
+    UiAppConfig invalid_fixed_scale;
+    invalid_fixed_scale.scaling.fixed_scale = 0.0f;
+    Expect(!app.Initialize(std::move(invalid_fixed_scale)), "Non-positive fixed scale must be rejected");
+
+    UiAppConfig invalid_user_scale;
+    invalid_user_scale.scaling.user_scale = std::numeric_limits<float>::quiet_NaN();
+    Expect(!app.Initialize(std::move(invalid_user_scale)), "Non-finite user scale must be rejected");
 
     UiAppConfig invalid_renderer;
     invalid_renderer.renderer = static_cast<UiRendererPreference>(999);

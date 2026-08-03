@@ -27,10 +27,9 @@ Uni::GUI::UiAppConfig MakeTestConfig() {
     config.viewports = Uni::GUI::UiFeaturePolicy::Disabled;
     config.vsync = Uni::GUI::UiVsyncMode::Disabled;
     config.persistence.enabled = false;
-    config.dpi.high_density_window = false;
-    config.dpi.scale_style = false;
-    config.dpi.scale_fonts = false;
-    config.dpi.scale_viewports = false;
+    config.scaling.high_pixel_density = false;
+    config.scaling.mode = Uni::GUI::UiScaleMode::Fixed;
+    config.scaling.fixed_scale = 1.0f;
     config.frame_policy.idle = {Uni::GUI::UiLoopMode::Continuous, 0.0};
 
     Uni::GUI::UiDockLayout layout;

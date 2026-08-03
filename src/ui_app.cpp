@@ -8,6 +8,7 @@
 #include "ui_renderer.h"
 #include "ui_renderer_sdl.h"
 #include "ui_renderer_sdlgpu.h"
+#include "ui_scale.h"
 #include "ui_texture_internal.h"
 #include "ui_winsys.h"
 #include "ui_winsys_sdl.h"
@@ -25,6 +26,7 @@
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <limits>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -147,22 +149,70 @@ struct UiApp::Impl final {
     std::chrono::steady_clock::time_point initialized_at{};
     std::chrono::steady_clock::time_point last_activity{};
     std::chrono::steady_clock::time_point last_render{};
+    ImGuiStyle reference_style{};
+    UiDisplayMetrics display_metrics{};
+    bool has_display_metrics{false};
+
+    void ApplyDisplayScale() {
+        ImGuiStyle scaled_style = reference_style;
+        scaled_style.ScaleAllSizes(display_metrics.applied_ui_scale);
+        scaled_style.FontScaleDpi = display_metrics.applied_ui_scale;
+        if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+            scaled_style.WindowRounding = 0.0f;
+            scaled_style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+        }
+        ImGui::GetStyle() = scaled_style;
+    }
+
+    [[nodiscard]] UiResult<bool> RefreshDisplayMetrics(const bool required) {
+        const auto window_metrics = winsys ? winsys->QueryDisplayMetrics() : std::nullopt;
+        if (!window_metrics) {
+            if (required) {
+                return std::unexpected(MakeError(
+                    UiErrorCode::WindowCreation,
+                    "Failed to query main-window display metrics",
+                    true));
+            }
+            return false;
+        }
+        const std::uint64_t revision = has_display_metrics ? display_metrics.revision + 1 : 1;
+        if (revision == 0) {
+            return std::unexpected(MakeError(UiErrorCode::InvalidState, "Display metrics revision is exhausted"));
+        }
+        auto resolved = Detail::ResolveDisplayMetrics(*window_metrics, config.scaling, revision);
+        if (!resolved) {
+            if (required) {
+                return std::unexpected(MakeError(
+                    UiErrorCode::InvalidArgument,
+                    "Display metrics or scaling configuration is invalid"));
+            }
+            return false;
+        }
+        if (has_display_metrics && Detail::SameDisplayMetrics(display_metrics, *resolved)) {
+            return false;
+        }
+        display_metrics = *resolved;
+        has_display_metrics = true;
+        if (imgui_context) {
+            ApplyDisplayScale();
+        }
+        return true;
+    }
 
     [[nodiscard]] std::expected<void, UiError> Initialize(UiAppConfig new_config) {
         if (lifecycle != UiLifecycleState::Empty) {
             return std::unexpected(MakeError(UiErrorCode::InvalidState, "UiApp is not empty"));
         }
-        constexpr int max_window_dimension = 65535;
-        if (new_config.initial_width <= 0 ||
-            new_config.initial_height <= 0 ||
-            new_config.initial_width > max_window_dimension ||
-            new_config.initial_height > max_window_dimension) {
+        if (new_config.initial_width <= 0 || new_config.initial_height <= 0) {
             return std::unexpected(MakeError(
                 UiErrorCode::InvalidArgument,
-                "Initial window dimensions must be in the range [1, 65535]"));
+                "Initial window dimensions must be positive"));
         }
-        if (!std::isfinite(new_config.font.size_pixels) || new_config.font.size_pixels <= 0.0f) {
+        if (!std::isfinite(new_config.font.size) || new_config.font.size <= 0.0f) {
             return std::unexpected(MakeError(UiErrorCode::InvalidArgument, "Font size must be positive and finite"));
+        }
+        if (!Detail::ValidScalingConfig(new_config.scaling)) {
+            return std::unexpected(MakeError(UiErrorCode::InvalidArgument, "Scaling configuration is invalid"));
         }
         switch (new_config.renderer) {
         case UiRendererPreference::Automatic:
@@ -313,11 +363,8 @@ struct UiApp::Impl final {
 
         ImGui::StyleColorsDark();
         ImGuiStyle& style = ImGui::GetStyle();
-        const float display_scale = winsys->GetDisplayScale();
-        if (config.dpi.scale_style) {
-            style.ScaleAllSizes(display_scale);
-        }
-        style.FontScaleDpi = config.dpi.scale_fonts ? display_scale : 1.0f;
+        reference_style = style;
+        reference_style.FontSizeBase = config.font.size;
 
         const ImWchar* glyph_ranges = config.font.glyph_range == UiGlyphRange::Cyrillic
             ? io.Fonts->GetGlyphRangesCyrillic()
@@ -326,13 +373,13 @@ struct UiApp::Impl final {
         if (config.font.path.empty()) {
             font = io.Fonts->AddFontFromMemoryCompressedBase85TTF(
                 Font::GetRobotoMedium(),
-                config.font.size_pixels,
+                config.font.size,
                 nullptr,
                 glyph_ranges);
         } else {
             font = io.Fonts->AddFontFromFileTTF(
                 config.font.path.c_str(),
-                config.font.size_pixels,
+                config.font.size,
                 nullptr,
                 glyph_ranges);
         }
@@ -374,10 +421,12 @@ struct UiApp::Impl final {
         }
         if (config.viewports != UiFeaturePolicy::Disabled && viewports_supported) {
             io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-            io.ConfigDpiScaleFonts = config.dpi.scale_fonts;
-            io.ConfigDpiScaleViewports = config.dpi.scale_viewports;
-            style.WindowRounding = 0.0f;
-            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+            io.ConfigDpiScaleFonts = false;
+            io.ConfigDpiScaleViewports = config.scaling.mode == UiScaleMode::Automatic;
+        }
+        auto display_ready = RefreshDisplayMetrics(true);
+        if (!display_ready) {
+            return fail(std::move(display_ready.error()));
         }
 
         assets.Configure(config.asset_limits, font);
@@ -486,6 +535,9 @@ struct UiApp::Impl final {
         winsys.reset();
         dispatcher.reset();
         config = {};
+        reference_style = {};
+        display_metrics = {};
+        has_display_metrics = false;
         frame_active = false;
         imgui_frame_active = false;
         event_dispatch_active = false;
@@ -585,12 +637,16 @@ UiResult<UiTickResult> UiApp::Tick() {
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
 
     const auto now = std::chrono::steady_clock::now();
+    auto metrics_changed = m_impl->RefreshDisplayMetrics(false);
+    if (!metrics_changed) {
+        return std::unexpected(std::move(metrics_changed.error()));
+    }
     auto drained = Detail::DrainDispatcher(m_impl->dispatcher, *this);
     if (!drained) {
         return std::unexpected(std::move(drained.error()));
     }
     const bool frame_requested = Detail::ConsumeFrameRequest(m_impl->dispatcher);
-    if (*drained > 0 || frame_requested) {
+    if (*drained > 0 || frame_requested || *metrics_changed) {
         m_impl->last_activity = now;
     }
     if (Detail::ConsumeExitRequest(m_impl->dispatcher)) {
@@ -607,6 +663,7 @@ UiResult<UiTickResult> UiApp::Tick() {
 
     bool should_render = m_impl->last_render.time_since_epoch().count() == 0 ||
                          frame_requested ||
+                         *metrics_changed ||
                          m_impl->previous_frame_demand == UiFrameDemand::Continuous ||
                          m_impl->dock_layouts.HasPendingWork();
     if (minimized && !m_impl->config.frame_policy.render_while_minimized) {
@@ -723,11 +780,19 @@ UiResult<UiEventDispatchResult> UiApp::DispatchEvent(const SDL_Event& event) {
     FrameActivityGuard event_activity(m_impl->event_dispatch_active);
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
     UiEventAction action = UiEventAction::Pass;
+    const bool application_quit_requested = m_impl->winsys->IsApplicationQuitEvent(event);
+    const bool main_window_close_requested = m_impl->winsys->IsMainWindowCloseEvent(event);
     bool delivered = false;
     bool recognized = false;
     try {
         if (m_impl->config.event_hooks.before_imgui) {
-            UiEventContext event_context{*this, event, action, false, false};
+            UiEventContext event_context{.app = *this,
+                                         .event = event,
+                                         .application_quit_requested = application_quit_requested,
+                                         .main_window_close_requested = main_window_close_requested,
+                                         .current_action = action,
+                                         .delivered_to_imgui = false,
+                                         .recognized_by_imgui = false};
             auto hooked = m_impl->config.event_hooks.before_imgui(event_context);
             if (!hooked) {
                 return std::unexpected(std::move(hooked.error()));
@@ -738,13 +803,19 @@ UiResult<UiEventDispatchResult> UiApp::DispatchEvent(const SDL_Event& event) {
         if (action == UiEventAction::Pass) {
             delivered = true;
             recognized = m_impl->winsys->FeedEvent(event);
-            if (m_impl->winsys->IsCloseEvent(event)) {
+            if (application_quit_requested || main_window_close_requested) {
                 action = UiEventAction::Exit;
             }
         }
 
         if (m_impl->config.event_hooks.after_imgui) {
-            UiEventContext event_context{*this, event, action, delivered, recognized};
+            UiEventContext event_context{.app = *this,
+                                         .event = event,
+                                         .application_quit_requested = application_quit_requested,
+                                         .main_window_close_requested = main_window_close_requested,
+                                         .current_action = action,
+                                         .delivered_to_imgui = delivered,
+                                         .recognized_by_imgui = recognized};
             auto hooked = m_impl->config.event_hooks.after_imgui(event_context);
             if (!hooked) {
                 return std::unexpected(std::move(hooked.error()));
@@ -878,6 +949,78 @@ UiResult<void> UiApp::SetVsync(const UiVsyncMode mode) {
         return std::unexpected(MakeError(UiErrorCode::RendererInitialization, "Failed to update VSync", true));
     }
     m_impl->config.vsync = mode;
+    return {};
+}
+
+UiResult<void> UiApp::SetWindowTitle(std::string title) {
+    if (!IsMainThread()) {
+        return std::unexpected(MakeError(UiErrorCode::WrongThread, "SetWindowTitle must run on the UI thread"));
+    }
+    if (m_impl->lifecycle != UiLifecycleState::Ready || !m_impl->winsys) {
+        return std::unexpected(MakeError(UiErrorCode::InvalidState, "UiApp is not ready"));
+    }
+    if (m_impl->config.title == title)
+        return {};
+    if (!m_impl->winsys->SetTitle(title))
+        return std::unexpected(MakeError(UiErrorCode::WindowCreation, "Failed to update the window title", true));
+    m_impl->config.title = std::move(title);
+    return {};
+}
+
+UiResult<UiDisplayMetrics> UiApp::DisplayMetrics() const {
+    if (m_impl->lifecycle != UiLifecycleState::Ready || !m_impl->has_display_metrics) {
+        return std::unexpected(MakeError(UiErrorCode::InvalidState, "UiApp is not ready"));
+    }
+    if (!IsMainThread()) {
+        return std::unexpected(MakeError(UiErrorCode::WrongThread, "DisplayMetrics must run on the UI thread"));
+    }
+    return m_impl->display_metrics;
+}
+
+UiResult<void> UiApp::SetUserScale(const float scale) {
+    if (m_impl->lifecycle != UiLifecycleState::Ready || !m_impl->has_display_metrics ||
+        m_impl->imgui_frame_active) {
+        return std::unexpected(MakeError(UiErrorCode::InvalidState, "UI scale cannot change in the current state"));
+    }
+    if (!IsMainThread()) {
+        return std::unexpected(MakeError(UiErrorCode::WrongThread, "SetUserScale must run on the UI thread"));
+    }
+    UiScalingConfig candidate = m_impl->config.scaling;
+    candidate.user_scale = scale;
+    const auto effective = Detail::ResolveEffectiveUiScale(candidate, m_impl->display_metrics.system_ui_scale);
+    if (!effective) {
+        return std::unexpected(MakeError(UiErrorCode::InvalidArgument, "UI scale must be positive and finite"));
+    }
+    if (candidate.user_scale == m_impl->config.scaling.user_scale) {
+        return {};
+    }
+    ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
+    m_impl->config.scaling = candidate;
+    auto refreshed = m_impl->RefreshDisplayMetrics(true);
+    if (!refreshed) {
+        return std::unexpected(std::move(refreshed.error()));
+    }
+    if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
+        return std::unexpected(std::move(requested.error()));
+    }
+    return {};
+}
+
+UiResult<void> UiApp::SetReferenceStyle(const ImGuiStyle& style) {
+    if (m_impl->lifecycle != UiLifecycleState::Ready || !m_impl->imgui_context ||
+        !m_impl->has_display_metrics || m_impl->imgui_frame_active) {
+        return std::unexpected(MakeError(UiErrorCode::InvalidState, "Reference style cannot change in the current state"));
+    }
+    if (!IsMainThread()) {
+        return std::unexpected(MakeError(UiErrorCode::WrongThread, "SetReferenceStyle must run on the UI thread"));
+    }
+    ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
+    m_impl->reference_style = style;
+    m_impl->reference_style.FontSizeBase = m_impl->config.font.size;
+    m_impl->ApplyDisplayScale();
+    if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
+        return std::unexpected(std::move(requested.error()));
+    }
     return {};
 }
 

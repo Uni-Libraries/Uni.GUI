@@ -20,13 +20,16 @@ namespace Uni::GUI {
 
         void* GetHandle() override;
 
-        [[nodiscard]] float GetDisplayScale() const override;
+        [[nodiscard]] std::optional<Detail::UiWindowMetrics> QueryDisplayMetrics() const override;
 
         [[nodiscard]] bool IsMinimized() const override;
 
+        bool SetTitle(std::string_view title) override;
+
         bool FeedEvent(const SDL_Event& event) override;
 
-        [[nodiscard]] bool IsCloseEvent(const SDL_Event& event) const noexcept override;
+        [[nodiscard]] bool IsApplicationQuitEvent(const SDL_Event& event) const noexcept override;
+        [[nodiscard]] bool IsMainWindowCloseEvent(const SDL_Event& event) const noexcept override;
 
         void NewFrame() override;
 
@@ -34,7 +37,6 @@ namespace Uni::GUI {
 
     private:
         void* m_sdl_window{};
-        float m_display_scale{1.0f};
         bool m_sdl_initialized{};
     };
 }

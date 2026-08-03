@@ -15,6 +15,7 @@ target_sources(unigui
         ui_dock_layout.cpp
         ui_element_registry.cpp
         ui_font.cpp
+        ui_scale.cpp
         nodes/commands/clipboard.cpp
         nodes/commands/command_stack.cpp
         nodes/commands/graph.cpp
@@ -71,6 +72,7 @@ target_sources(unigui
             "${unigui_public_include_dir}/uni/gui/callbacks.h"
             "${unigui_public_include_dir}/uni/gui/config.h"
             "${unigui_public_include_dir}/uni/gui/dispatcher.h"
+            "${unigui_public_include_dir}/uni/gui/display.h"
             "${unigui_public_include_dir}/uni/gui/element.h"
             "${unigui_public_include_dir}/uni/gui/error.h"
             "${unigui_public_include_dir}/uni/gui/event.h"

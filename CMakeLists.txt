@@ -124,7 +124,9 @@ if(UNIGUI_INSTALL)
         DESTINATION "${unigui_license_install_dir}"
         RENAME LICENSE.nlohmann-json)
     set(unigui_doc_install_dir "${CMAKE_INSTALL_DATADIR}/doc/UniGUI")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/ABI_POLICY.md"
+    install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/ABI_POLICY.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/display_scaling.md"
         DESTINATION "${unigui_doc_install_dir}/docs")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/docs/nodes"
         DESTINATION "${unigui_doc_install_dir}/docs")
