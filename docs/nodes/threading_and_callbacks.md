@@ -92,6 +92,12 @@ If a callback captures external state that changes without a model or registry r
 
 `ValidateGraph()` pins an immutable document snapshot and one `RegistrySnapshot` before traversal. Descriptor validators and all link checks therefore observe stable configuration even if captured external code mutates the live document during a callback; diagnostics still describe the captured generations. Validators should remain pure. Any update on the active logical catalog returns `CommandFailed`.
 
+## Pin Schema Resolvers
+
+`ConfigurablePinSchema::resolve` runs synchronously during registration for default properties and when an explicit schema dependency is configured. It must be pure, deterministic for an equal `PropertyBag`, and must not mutate the document, presentation, command stack, or active catalog. Captured state is part of immutable schema identity; replace the `NodeTypeDescriptor` when that configuration changes. Exceptions are converted to `CommandFailed`, and returned pins are normalized and structurally validated before any document mutation.
+
+The registry materializes the default result once. `DefaultPinSchema()`, converter construction, and create-palette rendering read that immutable result and never invoke the resolver per frame.
+
 ## Context Menu Callback
 
 `DrawEditorContextMenuFn` may draw ImGui menu items and call `EditorMenuContext::Submit()`. Its document, presentation, selection, and target accessors are const views/copies. Direct model mutation or ID allocation is detected; queued commands from a failed/invalid callback are discarded. Exceptions are converted to `LastError()`.

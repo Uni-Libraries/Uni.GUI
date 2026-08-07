@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 
-set(UNIGUI_VERSION "2.0.0")
-set(UNIGUI_RELEASE_DATE "2026-08-04")
+set(UNIGUI_VERSION "3.0.0")
+set(UNIGUI_RELEASE_DATE "2026-08-07")
 string(REGEX MATCH
     "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     UNIGUI_VERSION_MATCH

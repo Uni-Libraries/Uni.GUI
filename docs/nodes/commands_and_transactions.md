@@ -47,7 +47,7 @@ Transactions maintain an entity journal. Finalization compares only journaled se
 The public command set covers:
 
 - Schema/root graph changes and graph add/remove.
-- Node add/delete, display name, properties, subgraph binding, and graph interfaces.
+- Node add/delete, display name, schema-aware properties, subgraph binding, and graph interfaces.
 - Dynamic pin add/remove/update/reorder.
 - Link connect/reconnect/delete and automatic converter insertion.
 - Intergraph connect/disconnect.
@@ -58,6 +58,8 @@ The public command set covers:
 - Fragment paste, alignment, and layout through prepared commands.
 
 Use the specialized command rather than reconstructing a graph. Specialized commands retain the exact data required for undo, preserve route state when requested, and assign the correct semantic revision domains.
+
+`SetNodePropertyCommand` resolves a configurable pin schema only when the edited key is an explicit schema dependency. Retained semantic keys retain IDs, valid links remain connected, and `InvalidConnectionPolicy::Disconnect` removes invalid links and presentation as part of the same undo record. Use `InvalidConnectionPolicy::Reject` for workflows where topology must be repaired explicitly before configuration changes.
 
 ## Compound Commands
 
@@ -124,7 +126,7 @@ private:
 
 Capture undo data from `transaction.Document()` or `transaction.Presentation()` on the first apply, not from an external live object. Do not mutate the original document or reserve IDs through it while a transaction is active; allocation-epoch checks will reject the commit. Use transaction allocation methods. `RegistrySnapshot` is copyable when a command needs to own the immutable generation; `transaction.Registry()` exposes that same recorder-backed snapshot to `Revert()`. Retaining a reference after the callback is invalid.
 
-Custom commands do not declare authorization intents. Every successful transaction mutator emits its own structured policy record, so command names and custom metadata cannot hide a mutation. `Apply()` and `Revert()` must be free of external side effects because they run against staged state before policy authorization.
+Custom commands do not declare authorization intents. Every successful transaction mutator emits its own structured policy record, so command names and custom metadata cannot hide a mutation. `GraphTransaction::SetNodeProperty()` resolves declared schema dependencies itself and rejects a transition that would require implicit link removal; a custom command that wants disconnection must capture and remove those links explicitly for undo. `Apply()` and `Revert()` must be free of external side effects because they run against staged state before policy authorization.
 
 `TryMerge()` defaults to `false`. `SetNodePropertyCommand::Edit` and `NodeUiContext::EditProperty()` use it to coalesce an active ImGui gesture.
 

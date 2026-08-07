@@ -109,9 +109,9 @@ descriptor.migrate = [](NodeMigrationContext& context) -> Result<void> {
 };
 ```
 
-The callback can edit properties and dynamic/static pin data, allocate IDs, call `remap_links(old, replacement)`, or call `remove_links(pin)`. It must keep `NodeCreation::node.pins` and `creation.pins` consistent. A required callback that is absent returns `MigrationMissing`.
+The callback can edit properties and instance/descriptor-owned pin data, allocate IDs, call `remap_links(old, replacement)`, or call `remove_links(pin)`. It must keep `NodeCreation::node.pins` and `creation.pins` consistent. After the final step, descriptor-owned pins must exactly match `ResolvePinSchema()` for the migrated properties. A required callback that is absent returns `MigrationMissing`.
 
-An unregistered node type loads unchanged with a warning. A node version newer than its installed descriptor is also preserved with a warning and is not downgraded or validated by the older descriptor. Deserialization pins one immutable descriptor generation before document migrations; node callbacks cannot self-register/unregister, and active descriptor/function ownership survives external registry move or destruction.
+An unregistered node type loads unchanged with a warning. A node version newer than its installed descriptor is also preserved with a warning and is not downgraded or resolved by the older descriptor. Any change to configurable schema dependencies, resolver behavior, or semantic-key meaning requires a descriptor version increment and migration. Deserialization pins one immutable descriptor generation before document migrations; node callbacks cannot self-register/unregister, and active descriptor/function ownership survives external registry move or destruction.
 
 ## Limits
 

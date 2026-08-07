@@ -17,7 +17,7 @@ Result<void> RegisterGain(RegistryCatalog& registry) {
         .display_name = "Gain",
         .category = "Audio",
         .version = 2,
-        .static_pins = {
+        .pin_schema = {
             PinDescriptor{
                 .key = "input",
                 .label = "Input",
@@ -50,7 +50,56 @@ Result<void> RegisterGain(RegistryCatalog& registry) {
 
 The registry rejects empty types and names, version zero, duplicate type IDs, duplicate or empty pin keys, invalid pin metadata, non-finite property defaults, and invalid impact declarations. An empty pin label is normalized to its semantic key.
 
-Static pin order and metadata belong to the descriptor. `Instantiate()` copies defaults, allocates the node and pin IDs, marks the pins `PinStorage::Static`, and sets `type_version` to the descriptor version. Static pins cannot be removed or manually reordered. Dynamic pins are owned by the instance and must still have unique semantic keys.
+`NodePinSchema` is the single source of descriptor-owned pin metadata. A braced list creates a fixed schema. `Instantiate()` copies defaults, applies `NodeInstantiationOptions::property_overrides`, resolves the schema, allocates node and pin IDs, marks descriptor-owned pins `PinStorage::Static`, and sets `type_version` to the descriptor version. `PinStorage::Static` describes ownership, not lifetime: a configurable descriptor may reconcile those pins when a declared dependency changes. Instance-owned dynamic pins retain `PinStorage::Dynamic` and must have unique semantic keys.
+
+### Configurable Pin Schemas
+
+Use a configurable `NodePinSchema` when properties determine pin count, order, labels, types, directions, kinds, or cardinalities:
+
+```cpp
+descriptor.pin_schema = NodePinSchema{
+    {"input_count"},
+    [](const PropertyBag& properties) -> Result<std::vector<PinDescriptor>> {
+        const auto found = properties.find("input_count");
+        const auto* count = found == properties.end()
+            ? nullptr
+            : std::get_if<std::int64_t>(&found->second);
+        if (count == nullptr || *count < 0 || *count > 64) {
+            return std::unexpected(Error{
+                ErrorCode::InvalidArgument,
+                "input_count must be between 0 and 64",
+            });
+        }
+
+        std::vector<PinDescriptor> pins;
+        pins.reserve(static_cast<std::size_t>(*count) + 1);
+        for (std::int64_t index = 0; index < *count; ++index) {
+            const std::string key = "input." + std::to_string(index);
+            pins.push_back(PinDescriptor{
+                .key = key,
+                .label = "Input " + std::to_string(index + 1),
+                .type = TypeId{"number"},
+            });
+        }
+        pins.push_back(PinDescriptor{
+            .key = "result",
+            .label = "Result",
+            .type = TypeId{"number"},
+            .direction = PinDirection::Output,
+            .cardinality = PinCardinality::Multiple,
+        });
+        return pins;
+    },
+};
+descriptor.default_properties = {{"input_count", std::int64_t{2}}};
+descriptor.property_impacts = {{"input_count", PropertyImpact::Geometry}};
+```
+
+Dependencies are explicit and independent of `PropertyImpact`: every property read by the resolver must be listed, regardless of its revision impact. A dependent edit resolves the complete schema once and reconciles descriptor-owned pins by semantic key. Retained keys retain `PinId`; removed keys do not leave dormant connections; newly reintroduced keys receive new IDs. Instance-owned pin order is preserved around the descriptor subsequence.
+
+The resolver must be pure, deterministic for an equal `PropertyBag`, and depend only on its argument and immutable captured configuration. Registration resolves and validates the default schema once. `DefaultPinSchema()` returns that materialized schema without invoking application code, which keeps converter construction and the editor palette out of the callback path. `ResolvePinSchema()` explicitly resolves non-default properties and validates unique non-empty keys and pin metadata.
+
+Use `InvalidConnectionPolicy::Reject` on `SetNodePropertyCommand` to reject a schema change that would invalidate links. The default `Disconnect` policy removes only invalid local or intergraph links and their presentation, and undo restores exact IDs and routes. Direct custom-command calls to `GraphTransaction::SetNodeProperty()` preserve the same schema invariant but reject changes that require implicit disconnection; remove and capture those links explicitly when custom undo semantics require it.
 
 `NodeBehavior::validate` adds application messages to `ValidateGraph()`. `NodeBehaviorPtr` is an explicit immutable behavior identity: reusing the handle makes behavior equality honest, while a different handle is a descriptor change. Validation does not replace structural or connection validation, and it does not mutate the node.
 
@@ -61,9 +110,9 @@ Declare the least expensive correct `PropertyImpact`:
 - `RuntimeOnly`: runtime data changed; cached editor geometry remains valid.
 - `Rendering`: node drawing may change, but size and pin placement remain valid.
 - `Geometry`: body size or pin layout can change.
-- `Topology`: connectivity or projected topology can change.
+- `Topology`: application semantics beyond pin-schema dependencies can change connectivity.
 
-Both `RuntimeOnly` and `Rendering` advance the value revision only. Undeclared properties default to `Geometry`; set `undeclared_property_impact` explicitly if a plugin has a different conservative default. See [semantic revisions](semantic_model.md#revisions-and-identity) and [performance](performance.md).
+Both `RuntimeOnly` and `Rendering` advance the value revision only. A resolved pin-schema delta independently adds layout and topology revisions, so a schema dependency does not need to be mislabeled `Topology`. Undeclared properties default to `Geometry`; set `undeclared_property_impact` explicitly if a plugin has a different conservative default. See [semantic revisions](semantic_model.md#revisions-and-identity) and [performance](performance.md).
 
 ## Node Body And Inspector
 
@@ -231,7 +280,7 @@ auto converted = registry.RegisterConversion(ConversionDescriptor{
 });
 ```
 
-The conversion node must already be registered. The named static pins must have input/output directions and must exactly match all three fields of `ConversionKey`. Data and execution conversions for the same type pair are independent. Only one live conversion may exist for one exact key.
+The conversion node must already be registered. The named pins in its materialized default schema must have input/output directions and must exactly match all three fields of `ConversionKey`. Data and execution conversions for the same type pair are independent. Only one live conversion may exist for one exact key.
 
 Applications with type families can install one compatibility policy:
 
@@ -258,7 +307,7 @@ When `Check()` returns `RequiresConversion`, `ConnectionResult::recipe` is an ex
 
 `RegistryCatalog::Check()` and `RegistrySnapshot::Check()` return `Allowed`, `RequiresConversion`, or `Rejected`. `PrepareConnectionCommand()` performs complete graph/cardinality/protection validation against one pinned generation, then returns either a direct connection/reconnect command or one atomic `InsertConversionCommand`. A recipe from another catalog fails with `RegistryMismatch`. Executing the command adds the converter and two links, and one undo removes the entire insertion.
 
-`RegistrySnapshot::Instantiate()` embeds immutable descriptor provenance in the returned `NodeCreation`. `AddNodeCommand::Apply()` records the current descriptor dependency and verifies descriptor version plus the ordered static pin schema. Extra intentional `PinStorage::Dynamic` pins are allowed. A descriptor removal or incompatible replacement between preparation and apply fails closed; a related replacement while authorization is deferred makes resume return `RevisionConflict`.
+`RegistrySnapshot::Instantiate()` embeds immutable descriptor provenance in the returned `NodeCreation`. `AddNodeCommand::Apply()` records the current descriptor dependency and verifies descriptor version plus the resolved ordered pin schema. Extra intentional `PinStorage::Dynamic` pins are allowed. A descriptor removal or replacement between preparation and apply fails closed; schema-aware undo/redo also requires the exact descriptor identity captured on first apply. A related replacement while authorization is deferred makes resume return `RevisionConflict`.
 
 `RegisterConversion()` returns a `ConversionRegistrationToken`. For reload, call `RegistryCatalog::BeginUpdate()` (or `NodeEditorWorkspace::BeginUpdate()`) and stage node plus conversion changes before one `Commit()`. Descriptors, conversions, registration indexes, and reverse indexes are persistent AVL roots: snapshots are O(1), point updates path-copy O(log N), and dependent recipe fanout is O(D). Commit validates the final schema, preserves replacement tokens, and publishes at most one generation; identical replacements and net no-op batches retain baseline roots, revisions, and recipe identities. Old snapshots remain usable. `RegistrationsForNodeType()` and `HasConversionsForNodeType()` provide lifecycle queries. Node removal returns `TypeInUse` until referencing conversions are removed, unless recipes and node are removed in the same update.
 

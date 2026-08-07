@@ -45,7 +45,7 @@ A `Graph` contains:
 
 Per-graph `SemanticRevisionSet` values are stored separately in the document's sharded `GraphRevisionMap`, not inside the heavier `Graph` record.
 
-A `NodeInstance` stores its `TypeId`, persisted descriptor version, display name, typed properties, ordered pin IDs, optional subgraph binding, role, and read-only flag. A `PinInstance` stores a semantic key, label, value type, direction, data/execution kind, cardinality, static/dynamic ownership, and protection. A `Link` always names an output and input pin in the same graph.
+A `NodeInstance` stores its `TypeId`, persisted descriptor version, display name, typed properties, ordered pin IDs, optional subgraph binding, role, and read-only flag. A `PinInstance` stores a semantic key, label, value type, direction, data/execution kind, cardinality, descriptor/instance ownership through `PinStorage`, and protection. `PinStorage::Static` means descriptor-owned; a configurable descriptor can reconcile those pins over time. A `Link` always names an output and input pin in the same graph.
 
 `GraphDocument::ValidateStructure()` checks document-wide identity, ownership, pin ownership and order, link endpoints, hierarchy, graph interfaces, intergraph links, and dependency cycles. Registry-aware checks are added by `ValidateGraph()`.
 
@@ -98,6 +98,8 @@ Read-only flags are semantic protection. Presentation `locked` flags prevent edi
 | `Topology` | value, layout, topology |
 
 An undeclared property uses `undeclared_property_impact`, which defaults to `Geometry`. The impact selected on the first apply is retained by property undo and redo.
+
+Configurable pin schemas declare their property dependencies separately from this table. If resolving a dependency changes descriptor-owned pin metadata or order, the transaction also advances the required layout/topology domains. A label-only schema change advances layout; structural pin or connection changes advance layout and topology.
 
 `GraphPresentation::PresentationRevision()` advances for any persisted presentation change. `GeometryRevision()` advances only when geometry-relevant fields change; colors and locks do not invalidate geometry by themselves.
 

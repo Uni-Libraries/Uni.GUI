@@ -26,7 +26,7 @@ Result<void> RegisterTypes(NodeWorkspace& workspace) {
         .type = TypeId{"example.number"},
         .display_name = "Number",
         .category = "Values",
-        .static_pins = {
+        .pin_schema = {
             PinDescriptor{
                 .key = "value",
                 .label = "Value",
@@ -44,7 +44,7 @@ Result<void> RegisterTypes(NodeWorkspace& workspace) {
         .type = TypeId{"example.print"},
         .display_name = "Print",
         .category = "Output",
-        .static_pins = {
+        .pin_schema = {
             PinDescriptor{
                 .key = "value",
                 .label = "Value",
@@ -60,7 +60,7 @@ Registration validates non-empty stable IDs, descriptor versions, unique semanti
 
 ## Add Nodes Through Commands
 
-`NodeEditorWorkspace::InstantiateNode()` reserves IDs and builds static pins through the private registry, but does not insert anything or advance the model revision. Execute an `AddNodeCommand` to commit the creation.
+`NodeEditorWorkspace::InstantiateNode()` reserves IDs and resolves descriptor-owned pins through the private registry, but does not insert anything or advance the model revision. Execute an `AddNodeCommand` to commit the creation. Pass `NodeInstantiationOptions::property_overrides` when pin configuration must be resolved atomically before insertion.
 
 ```cpp
 Result<void> Populate(NodeWorkspace& workspace) {

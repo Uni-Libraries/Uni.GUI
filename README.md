@@ -2,7 +2,7 @@
 
 Uni.GUI is a C++23 application shell for Dear ImGui and ImPlot.
 
-The current version is `2.0.0`, released on 2026-08-04. Release details are in the [changelog](CHANGELOG.md), and compatibility guarantees are in the [ABI policy](docs/ABI_POLICY.md).
+The current version is `3.0.0`, released on 2026-08-07. Release details are in the [changelog](CHANGELOG.md), and compatibility guarantees are in the [ABI policy](docs/ABI_POLICY.md).
 
 ## Requirements
 
@@ -60,7 +60,7 @@ cmake --install build
 External project:
 
 ```cmake
-find_package(UniGUI 2.0 CONFIG REQUIRED)
+find_package(UniGUI 3.0 CONFIG REQUIRED)
 
 target_link_libraries(my_core PRIVATE UniGUI::UniGUI)
 target_link_libraries(my_callback_application PRIVATE UniGUI::Main)
@@ -350,4 +350,4 @@ Except for `UiDispatcher` operations and `UiCommandTicket` observation/waiting, 
 
 `UiApp`, `UiTexture`, and stateful Nodes classes use PIMPL. The shared library exports the public classes and functions marked by `UNI_GUI_EXPORT`, including the `Uni::GUI::Nodes` subsystem; internal renderer, SDL windowing, texture-store, and implementation types remain hidden and are not installed.
 
-Release `2.0.0` starts the stable ABI major `2`. Compatible `2.x` releases keep SOVERSION `2`, while incompatible ABI changes require a new major release. Shared-library consumers must still use the same C++ ABI family and the bundled ImGui/ImPlot package targets. The complete contract is in the [ABI policy](docs/ABI_POLICY.md).
+Release `3.0.0` starts the stable ABI major `3`. Compatible `3.x` releases keep SOVERSION `3`, while incompatible ABI changes require a new major release. Shared-library consumers must still use the same C++ ABI family and the bundled ImGui/ImPlot package targets. The complete contract is in the [ABI policy](docs/ABI_POLICY.md).
