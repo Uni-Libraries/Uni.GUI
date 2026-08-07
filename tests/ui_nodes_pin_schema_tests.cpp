@@ -113,9 +113,11 @@ class TransactionPropertyCommand final : public Command {
                     return std::unexpected(Error{ErrorCode::CommandFailed, "Requested projection failure"});
                 }
                 std::vector<PinDescriptor> pins;
-                if (mode == "source_sink" || mode == "source")
-                    pins.push_back(SourcePin(mode == "source" ? "Source output" : "Source/sink output"));
-                if (mode == "source_sink" || mode == "sink")
+                if (mode == "source_sink" || mode == "source" || mode == "rename")
+                    pins.push_back(SourcePin(mode == "source"   ? "Source output"
+                                             : mode == "rename" ? "Renamed source"
+                                                                : "Source/sink output"));
+                if (mode == "source_sink" || mode == "sink" || mode == "rename")
                     pins.push_back(SinkPin());
                 return pins;
             }},
@@ -395,6 +397,31 @@ void TestHistoryRejectsSchemaReplacement() {
            "Redo must fail closed after descriptor identity changes");
 }
 
+void TestSchemaRevisionDomains() {
+    RegistryCatalog registry;
+    Expect(registry.RegisterNodeType(ProjectedDescriptor()).has_value(),
+           "Schema revision fixture must register");
+    GraphDocument document;
+    GraphPresentation presentation;
+    CommandStack commands;
+    const GraphId graph = document.RootGraph();
+    auto creation = registry.Instantiate(document, TypeId{"projection.configurable"});
+    Expect(creation.has_value(), "Schema revision fixture must instantiate");
+    const NodeId node = creation->node.id;
+    Execute(commands, std::make_unique<AddNodeCommand>(graph, std::move(*creation)), document,
+            presentation, registry, "Schema revision fixture must be added");
+    const SemanticRevisionSet before = document.GraphRevisions(graph);
+    Execute(commands,
+            std::make_unique<SetNodePropertyCommand>(
+                graph, node, "mode", PropertyValue{std::string{"rename"}}),
+            document, presentation, registry, "Label-only schema change must execute");
+    const SemanticRevisionSet after = document.GraphRevisions(graph);
+    Expect(after.value == before.value + 1 && after.layout == before.layout + 1 &&
+               after.topology == before.topology &&
+               FindPin(document, graph, node, "source")->label == "Renamed source",
+           "Label-only schema changes must not invalidate topology revisions");
+}
+
 [[nodiscard]] NodeTypeDescriptor IntergraphProjectionDescriptor() {
     return NodeTypeDescriptor{
         .type = TypeId{"projection.intergraph-output"},
@@ -480,6 +507,7 @@ int main() {
     TestTopologyProjectionLocalLinksAndHistory();
     TestTransactionMutationBoundary();
     TestHistoryRejectsSchemaReplacement();
+    TestSchemaRevisionDomains();
     TestIntergraphProjectionCleanup();
     return EXIT_SUCCESS;
 }

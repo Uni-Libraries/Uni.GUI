@@ -630,6 +630,37 @@ Result<void> GraphTransaction::SetDescriptorPins(const GraphId graph, const Node
     if (pin_changes == 0 && current->pins == projected_order)
         return {};
 
+    std::unordered_map<PinId, SemanticDomain, IdHash> pin_domains;
+    SemanticDomain node_domains = current->pins == projected_order
+                                      ? SemanticDomain::None
+                                      : SemanticDomain::Layout;
+    for (const auto& [id, before] : before_by_id) {
+        const auto after = after_by_id.find(id);
+        SemanticDomain domains = SemanticDomain::None;
+        if (after == after_by_id.end() || before.type != after->second.type ||
+            before.direction != after->second.direction || before.kind != after->second.kind ||
+            before.cardinality != after->second.cardinality) {
+            domains |= SemanticDomain::Topology | SemanticDomain::Layout;
+        } else {
+            if (before.label != after->second.label)
+                domains |= SemanticDomain::Layout;
+            if (before.read_only != after->second.read_only)
+                domains |= SemanticDomain::Value;
+        }
+        if (domains != SemanticDomain::None) {
+            pin_domains.emplace(id, domains);
+            node_domains |= domains;
+        }
+    }
+    for (const auto& [id, after] : after_by_id) {
+        (void)after;
+        if (!before_by_id.contains(id)) {
+            const SemanticDomain domains = SemanticDomain::Topology | SemanticDomain::Layout;
+            pin_domains.emplace(id, domains);
+            node_domains |= domains;
+        }
+    }
+
     if (auto budget = m_impl->ConsumeOperations(pin_changes + 1); !budget)
         return budget;
     auto result = m_impl->staged_document.SetDescriptorPins(graph, node, pins);
@@ -639,14 +670,14 @@ Result<void> GraphTransaction::SetDescriptorPins(const GraphId graph, const Node
     }
 
     m_impl->model_changed = true;
-    m_impl->TouchNode(graph, node, SemanticDomain::Topology | SemanticDomain::Layout);
+    m_impl->TouchNode(graph, node, node_domains);
     const auto* after_graph = Document().FindGraph(graph);
     m_impl->Record({OperationKind::UpdateNode, OperationAction::Set, NodeOperation{graph, node, after_graph->nodes.SharedAt(node), {}}});
     for (const auto& [id, pin] : before_by_id) {
         const auto after = after_by_id.find(id);
         if (after != after_by_id.end() && after->second == pin)
             continue;
-        m_impl->TouchPin(graph, id, SemanticDomain::Topology | SemanticDomain::Layout);
+        m_impl->TouchPin(graph, id, pin_domains.at(id));
         if (after == after_by_id.end()) {
             m_impl->Record({OperationKind::RemovePin, OperationAction::Erase,
                             PinOperation{graph, node, id, PinOperation::NoIndex,
@@ -660,7 +691,7 @@ Result<void> GraphTransaction::SetDescriptorPins(const GraphId graph, const Node
         (void)pin;
         if (before_by_id.contains(id))
             continue;
-        m_impl->TouchPin(graph, id, SemanticDomain::Topology | SemanticDomain::Layout);
+        m_impl->TouchPin(graph, id, pin_domains.at(id));
         m_impl->Record({OperationKind::AddPin, OperationAction::Set, PinOperation{graph, node, id, PinOperation::NoIndex, after_graph->pins.SharedAt(id)}});
     }
     return {};
