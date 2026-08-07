@@ -155,7 +155,7 @@ namespace Uni::GUI::Example {
                 .type = TypeId{"demo.constant"},
                 .display_name = "Float Constant",
                 .category = "Stage 1 / Math",
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{
                         .key = "value",
                         .label = "Value",
@@ -170,7 +170,7 @@ namespace Uni::GUI::Example {
                 .type = TypeId{"demo.add"},
                 .display_name = "Add",
                 .category = "Stage 1 / Math",
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{.key = "a", .label = "A", .type = TypeId{"float"}},
                     PinDescriptor{.key = "b", .label = "B", .type = TypeId{"float"}},
                     PinDescriptor{
@@ -187,7 +187,7 @@ namespace Uni::GUI::Example {
                 .display_name = "Integer Constant",
                 .category = "Stage 3 / Conversion",
                 .version = 2,
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{
                         .key = "value",
                         .label = "Integer",
@@ -211,7 +211,7 @@ namespace Uni::GUI::Example {
                 .type = TypeId{"demo.int_to_float"},
                 .display_name = "Int to Float",
                 .category = "Stage 3 / Conversion",
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{.key = "in", .label = "Integer", .type = TypeId{"int"}},
                     PinDescriptor{
                         .key = "out",
@@ -226,7 +226,7 @@ namespace Uni::GUI::Example {
                 .type = TypeId{"demo.float_sink"},
                 .display_name = "Float Sink",
                 .category = "Stage 3 / Conversion",
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{.key = "value", .label = "Float", .type = TypeId{"float"}},
                 },
             }); !result) return result;
@@ -369,10 +369,10 @@ namespace Uni::GUI::Example {
 
         const GraphId root = m_node_document.RootGraph();
         m_node_ids.root = root;
-        auto constant = m_registry.Instantiate(m_node_document, TypeId{"demo.constant"}, "Stage 1 Constant");
-        auto add = m_registry.Instantiate(m_node_document, TypeId{"demo.add"}, "Stage 1 Add");
-        auto integer = m_registry.Instantiate(m_node_document, TypeId{"demo.int_constant"}, "Int Source");
-        auto sink = m_registry.Instantiate(m_node_document, TypeId{"demo.float_sink"}, "Float Sink");
+        auto constant = m_registry.Instantiate(m_node_document, TypeId{"demo.constant"}, {.display_name = "Stage 1 Constant"});
+        auto add = m_registry.Instantiate(m_node_document, TypeId{"demo.add"}, {.display_name = "Stage 1 Add"});
+        auto integer = m_registry.Instantiate(m_node_document, TypeId{"demo.int_constant"}, {.display_name = "Int Source"});
+        auto sink = m_registry.Instantiate(m_node_document, TypeId{"demo.float_sink"}, {.display_name = "Float Sink"});
         if (!constant || !add || !integer || !sink) {
             return std::unexpected(DemoError("Failed to instantiate feature-lab nodes"));
         }
@@ -432,7 +432,7 @@ namespace Uni::GUI::Example {
                 {m_node_ids.conversion_source, m_node_ids.conversion_sink}); !result) return result;
 
         auto make_call = [&](const char* name) -> Result<NodeCreation> {
-            return m_registry.Instantiate(m_node_document, TypeId{"demo.subgraph"}, name);
+            return m_registry.Instantiate(m_node_document, TypeId{"demo.subgraph"}, {.display_name = std::string{name}});
         };
         auto owned_call = make_call("Owned Pipeline");
         if (!owned_call) return std::unexpected(owned_call.error());
@@ -555,7 +555,7 @@ namespace Uni::GUI::Example {
             return std::unexpected(result.error());
         }
 
-        auto asset_call = m_registry.Instantiate(m_node_document, TypeId{"demo.asset_call"}, "Asset Filter");
+        auto asset_call = m_registry.Instantiate(m_node_document, TypeId{"demo.asset_call"}, {.display_name = "Asset Filter"});
         if (!asset_call) return std::unexpected(asset_call.error());
         m_node_ids.asset_call = asset_call->node.id;
         std::vector<std::unique_ptr<Command>> asset_call_commands;

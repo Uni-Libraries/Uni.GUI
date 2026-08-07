@@ -464,9 +464,10 @@ bool EditorDetail::EditorFrame::DrawCreatePalette(const bool open_popup) {
         std::optional<std::size_t> compatible_pin;
         if (session.popup_origin) {
             const auto* origin = document.FindPin(graph_id, session.popup_origin);
+            const auto default_pins = snapshot.DefaultPinSchema(type);
             std::optional<std::size_t> convertible_pin;
-            for (std::size_t index = 0; origin != nullptr && index < descriptor->static_pins.size(); ++index) {
-                const auto& candidate = descriptor->static_pins[index];
+            for (std::size_t index = 0; origin != nullptr && index < default_pins.size(); ++index) {
+                const auto& candidate = default_pins[index];
                 if (candidate.direction == origin->direction || candidate.kind != origin->kind) continue;
                 const auto compatibility = origin->direction == PinDirection::Output
                     ? snapshot.Check(origin->type, candidate.type, origin->kind)

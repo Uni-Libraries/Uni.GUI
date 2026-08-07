@@ -37,7 +37,7 @@ RegisteredConversion RegisterConverter(RegistryCatalog &registry,
   auto registered_node = registry.RegisterNodeType(NodeTypeDescriptor{
       .type = TypeId{node_type},
       .display_name = std::string{node_type},
-      .static_pins =
+      .pin_schema =
           {
               PinDescriptor{.key = "input", .type = source},
               PinDescriptor{
@@ -315,7 +315,7 @@ void TestAtomicUpdates() {
              ->RegisterNodeType(NodeTypeDescriptor{
                  .type = node_type,
                  .display_name = "Atomic converter",
-                 .static_pins =
+                 .pin_schema =
                      {
                          PinDescriptor{.key = "input", .type = source},
                          PinDescriptor{
@@ -368,7 +368,7 @@ void TestAtomicUpdates() {
              ->RegisterNodeType(NodeTypeDescriptor{
                  .type = invalid_node,
                  .display_name = "Invalid atomic converter",
-                 .static_pins =
+                 .pin_schema =
                      {
                          PinDescriptor{
                              .key = "input",

@@ -37,7 +37,7 @@ NodeTypeDescriptor SourceDescriptor(const std::uint32_t version = 1, MigrateNode
         .display_name = "Source",
         .category = "IO",
         .version = version,
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{
                     .key = "value",
@@ -58,7 +58,7 @@ NodeTypeDescriptor SinkDescriptor() {
         .type = TypeId{"io.sink"},
         .display_name = "Sink",
         .category = "IO",
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{
                     .key = "value",
@@ -1041,7 +1041,7 @@ void TestWorkspacePersistenceFacade() {
     Expect(workspace.RegisterNodeType(NodeTypeDescriptor{
                .type = TypeId{"workspace.converter"},
                .display_name = "Workspace converter",
-               .static_pins = {
+               .pin_schema = {
                    PinDescriptor{.key = "input", .type = TypeId{"workspace.left"}},
                    PinDescriptor{
                        .key = "output",

@@ -6,12 +6,14 @@
 
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Uni::GUI::Nodes {
@@ -56,6 +58,49 @@ struct NodeMigrationContext final {
 };
 
 using MigrateNodeFn = std::function<Result<void>(NodeMigrationContext &)>;
+using ResolvePinSchemaFn =
+    std::function<Result<std::vector<PinDescriptor>>(const PropertyBag &)>;
+
+struct ConfigurablePinSchema final {
+  std::vector<std::string> property_dependencies;
+  ResolvePinSchemaFn resolve;
+};
+
+using ConfigurablePinSchemaPtr = std::shared_ptr<const ConfigurablePinSchema>;
+
+class NodePinSchema final {
+public:
+  NodePinSchema() = default;
+  NodePinSchema(std::initializer_list<PinDescriptor> pins) : m_fixed{pins} {}
+  NodePinSchema(std::vector<PinDescriptor> pins)
+      : m_fixed{std::move(pins)} {}
+  NodePinSchema(std::vector<std::string> property_dependencies,
+                ResolvePinSchemaFn resolve)
+      : m_configurable{std::make_shared<const ConfigurablePinSchema>(
+            ConfigurablePinSchema{std::move(property_dependencies),
+                                  std::move(resolve)})} {}
+  NodePinSchema(ConfigurablePinSchemaPtr configurable)
+      : m_configurable{std::move(configurable)} {}
+
+  [[nodiscard]] bool IsConfigurable() const noexcept {
+    return static_cast<bool>(m_configurable);
+  }
+  [[nodiscard]] const std::vector<PinDescriptor> &FixedPins() const noexcept {
+    return m_fixed;
+  }
+  [[nodiscard]] std::vector<PinDescriptor> &FixedPins() noexcept {
+    return m_fixed;
+  }
+  [[nodiscard]] const ConfigurablePinSchemaPtr &Configurable() const noexcept {
+    return m_configurable;
+  }
+
+  bool operator==(const NodePinSchema &) const = default;
+
+private:
+  std::vector<PinDescriptor> m_fixed;
+  ConfigurablePinSchemaPtr m_configurable;
+};
 
 struct NodeBehavior final {
   MigrateNodeFn migrate;
@@ -79,13 +124,18 @@ struct NodeTypeDescriptor final {
   std::string display_name;
   std::string category;
   std::uint32_t version{1};
-  std::vector<PinDescriptor> static_pins;
+  NodePinSchema pin_schema;
   PropertyBag default_properties;
   std::map<std::string, PropertyImpact> property_impacts;
   PropertyImpact undeclared_property_impact{PropertyImpact::Geometry};
   NodeBehaviorPtr behavior;
 
   bool operator==(const NodeTypeDescriptor &) const = default;
+};
+
+struct NodeInstantiationOptions final {
+  std::string display_name;
+  PropertyBag property_overrides;
 };
 
 struct ConversionKey final {
@@ -190,10 +240,16 @@ public:
   [[nodiscard]] PropertyImpact
   ResolvePropertyImpact(const TypeId &type,
                         std::string_view key) const noexcept;
+  [[nodiscard]] Result<std::vector<PinDescriptor>>
+  ResolvePinSchema(const TypeId &type, const PropertyBag &properties) const;
+  [[nodiscard]] std::span<const PinDescriptor>
+  DefaultPinSchema(const TypeId &type) const noexcept;
+  [[nodiscard]] bool PinSchemaDependsOn(const TypeId &type,
+                                        std::string_view property) const noexcept;
   [[nodiscard]] std::vector<NodeTypeDescriptorPtr> Descriptors() const;
   [[nodiscard]] Result<NodeCreation>
   Instantiate(GraphDocument &document, const TypeId &type,
-              std::string_view display_name = {}) const;
+              NodeInstantiationOptions options = {}) const;
   [[nodiscard]] ConnectionResult Check(const TypeId &output,
                                        const TypeId &input, PinKind kind) const;
   [[nodiscard]] Result<void>
@@ -296,9 +352,15 @@ public:
   [[nodiscard]] PropertyImpact
   ResolvePropertyImpact(const TypeId &type,
                         std::string_view key) const noexcept;
+  [[nodiscard]] Result<std::vector<PinDescriptor>>
+  ResolvePinSchema(const TypeId &type, const PropertyBag &properties) const;
+  [[nodiscard]] std::span<const PinDescriptor>
+  DefaultPinSchema(const TypeId &type) const noexcept;
+  [[nodiscard]] bool PinSchemaDependsOn(const TypeId &type,
+                                        std::string_view property) const noexcept;
   [[nodiscard]] Result<NodeCreation>
   Instantiate(GraphDocument &document, const TypeId &type,
-              std::string_view display_name = {}) const;
+              NodeInstantiationOptions options = {}) const;
   [[nodiscard]] ConnectionResult Check(const TypeId &output,
                                        const TypeId &input, PinKind kind) const;
   [[nodiscard]] RegistrySnapshot Snapshot() const;

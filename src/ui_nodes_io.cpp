@@ -1201,19 +1201,23 @@ struct DecodedGraphAsset final {
         property);
 }
 
-void ValidateNodeDescriptor(const NodeCreation& creation, const NodeTypeDescriptor& descriptor) {
+void ValidateNodeDescriptor(const NodeCreation& creation, const RegistrySnapshot& registry, const NodeTypeDescriptor& descriptor) {
+    auto resolved = registry.ResolvePinSchema(descriptor.type, creation.node.properties);
+    if (!resolved) {
+        Fail(ErrorCode::MigrationFailed, "Migrated node pin schema resolution failed: " + resolved.error().message);
+    }
     std::vector<const PinInstance*> static_pins;
     for (const auto& pin : creation.pins) {
         if (pin.storage == PinStorage::Static)
             static_pins.push_back(&pin);
     }
-    if (static_pins.size() != descriptor.static_pins.size()) {
+    if (static_pins.size() != resolved->size()) {
         Fail(ErrorCode::MigrationFailed, "Migrated node static pin count does not match its descriptor");
     }
     for (std::size_t index = 0; index < static_pins.size(); ++index) {
         const auto& actual = *static_pins[index];
-        const auto& expected = descriptor.static_pins[index];
-        if (actual.key != expected.key || actual.type != expected.type || actual.direction != expected.direction ||
+        const auto& expected = (*resolved)[index];
+        if (actual.key != expected.key || actual.label != expected.label || actual.type != expected.type || actual.direction != expected.direction ||
             actual.kind != expected.kind || actual.cardinality != expected.cardinality) {
             Fail(ErrorCode::MigrationFailed, "Migrated node static pins do not match their descriptor");
         }
@@ -1325,7 +1329,7 @@ void MigrateCreation(NodeCreation creation, const RegistrySnapshot& registry,
         creation.node.type_version = from + 1;
         ValidateMigrationCreation(creation);
     }
-    ValidateNodeDescriptor(creation, *descriptor);
+    ValidateNodeDescriptor(creation, registry, *descriptor);
     replace(std::move(creation));
 }
 

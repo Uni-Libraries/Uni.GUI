@@ -40,7 +40,7 @@ void Require(Result<void> result, const std::string_view context) {
     return NodeTypeDescriptor{
         .type = ConverterType(index),
         .display_name = "Registry converter " + std::to_string(index),
-        .static_pins = {
+        .pin_schema = {
             PinDescriptor{.key = "input", .type = SourceType(index)},
             PinDescriptor{
                 .key = "output",

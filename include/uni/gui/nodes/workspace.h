@@ -108,9 +108,9 @@ public:
 
     [[nodiscard]] Result<NodeCreation> InstantiateNode(
         const TypeId& type,
-        const std::string_view display_name = {}) {
+        NodeInstantiationOptions options = {}) {
         if (m_loading) return LoadingError<NodeCreation>();
-        return m_registry.Instantiate(document, type, display_name);
+        return m_registry.Instantiate(document, type, std::move(options));
     }
 
     [[nodiscard]] Result<ConversionRegistrationToken> RegisterConversion(ConversionDescriptor descriptor) {

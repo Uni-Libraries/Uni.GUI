@@ -189,7 +189,7 @@ NodeTypeDescriptor BenchmarkNodeDescriptor(const std::uint32_t version, MigrateN
         .type = TypeId{"benchmark"},
         .display_name = "Benchmark",
         .version = version,
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{
                     .key = "out",

@@ -87,7 +87,7 @@ struct NodesFixture final {
                 .type = TypeId{"ui-test.source"},
                 .display_name = "Source",
                 .category = "Tests",
-                .static_pins = {PinDescriptor{
+                .pin_schema = {PinDescriptor{
                     .key = "value",
                     .label = "Value",
                     .type = TypeId{"float"},
@@ -99,7 +99,7 @@ struct NodesFixture final {
                 .type = TypeId{"ui-test.int-source"},
                 .display_name = "Integer source",
                 .category = "Tests",
-                .static_pins = {PinDescriptor{
+                .pin_schema = {PinDescriptor{
                     .key = "value",
                     .label = "Integer",
                     .type = TypeId{"int"},
@@ -111,7 +111,7 @@ struct NodesFixture final {
                 .type = TypeId{"ui-test.sink"},
                 .display_name = "Sink",
                 .category = "Tests",
-                .static_pins = {PinDescriptor{
+                .pin_schema = {PinDescriptor{
                     .key = "value",
                     .label = "Value",
                     .type = TypeId{"float"},
@@ -122,7 +122,7 @@ struct NodesFixture final {
                 .type = TypeId{"ui-test.converter"},
                 .display_name = "Integer to float",
                 .category = "Tests",
-                .static_pins = {
+                .pin_schema = {
                     PinDescriptor{
                         .key = "input",
                         .label = "Integer",

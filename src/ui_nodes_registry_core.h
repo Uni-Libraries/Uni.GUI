@@ -9,7 +9,7 @@ struct ConversionRecipe::State final {
   std::uint32_t node_version{1};
   std::string display_name;
   PropertyBag default_properties;
-  std::vector<PinDescriptor> static_pins;
+  std::vector<PinDescriptor> pins;
 };
 
 namespace Detail {
@@ -29,6 +29,9 @@ struct ConversionKeyHash final {
 
 using RegistryDescriptorMap =
     CowAdjacencyMap<TypeId, NodeTypeDescriptorPtr, CowCopyDomain::None>;
+using RegistryPinSchemaMap = CowAdjacencyMap<
+    TypeId, std::shared_ptr<const std::vector<PinDescriptor>>,
+    CowCopyDomain::None>;
 using RegistryConversionMap =
     CowAdjacencyMap<ConversionKey, ConversionRecipe, CowCopyDomain::None>;
 using RegistryRegistrationMap =
@@ -41,6 +44,7 @@ using RegistryReverseMap =
 
 struct RegistryState final {
   RegistryDescriptorMap descriptors;
+  RegistryPinSchemaMap default_pin_schemas;
   RegistryConversionMap conversions;
   std::shared_ptr<const TypeCompatibilityFn> type_compatibility;
   RegistryRegistrationMap registrations;
@@ -177,6 +181,37 @@ PropertyImpact RegistrySnapshot::ResolvePropertyImpact(
              : descriptor->undeclared_property_impact;
 }
 
+Result<std::vector<PinDescriptor>> RegistrySnapshot::ResolvePinSchema(
+    const TypeId& type, const PropertyBag& properties) const {
+    const auto descriptor = Find(type);
+    if (!descriptor) {
+        return std::unexpected(MakeError(ErrorCode::TypeNotFound, "Node type is not registered"));
+    }
+    return ResolveDescriptorPinSchema(*descriptor, properties);
+}
+
+std::span<const PinDescriptor> RegistrySnapshot::DefaultPinSchema(
+    const TypeId& type) const noexcept {
+    (void)Find(type);
+    if (m_state != nullptr) {
+        if (const auto* pins = m_state->default_pin_schemas.Find(type);
+            pins != nullptr && *pins != nullptr) {
+            return **pins;
+        }
+    }
+    return {};
+}
+
+bool RegistrySnapshot::PinSchemaDependsOn(
+    const TypeId& type, const std::string_view property) const noexcept {
+    const auto descriptor = Find(type);
+    if (!descriptor)
+        return false;
+    const auto& configurable = descriptor->pin_schema.Configurable();
+    return configurable != nullptr &&
+           std::ranges::contains(configurable->property_dependencies, property);
+}
+
 std::vector<NodeTypeDescriptorPtr> RegistrySnapshot::Descriptors() const {
   std::vector<NodeTypeDescriptorPtr> result;
   if (m_state == nullptr)
@@ -223,7 +258,7 @@ std::uint64_t RegistrySnapshot::Generation() const noexcept {
 
 Result<NodeCreation>
 RegistrySnapshot::Instantiate(GraphDocument &document, const TypeId &type,
-                              const std::string_view display_name) const {
+                              NodeInstantiationOptions options) const {
   const auto descriptor = Find(type);
   if (!descriptor) {
     return std::unexpected(
@@ -238,32 +273,46 @@ RegistrySnapshot::Instantiate(GraphDocument &document, const TypeId &type,
   }
   creation.node.type = descriptor->type;
   creation.node.type_version = descriptor->version;
-  creation.node.display_name = display_name.empty() ? descriptor->display_name
-                                                    : std::string(display_name);
+  creation.node.display_name = options.display_name.empty()
+                                   ? descriptor->display_name
+                                   : std::move(options.display_name);
   creation.node.properties = descriptor->default_properties;
-  creation.prepared_descriptor = descriptor;
-  creation.pins.reserve(descriptor->static_pins.size());
-  creation.node.pins.reserve(descriptor->static_pins.size());
-  for (const auto &pin : descriptor->static_pins) {
-    const PinId id = document.AllocatePinId();
-    if (!id) {
-      return std::unexpected(
-          MakeError(ErrorCode::InvalidArgument, "Pin ID space is exhausted"));
-    }
-    creation.node.pins.push_back(id);
-    creation.pins.push_back(PinInstance{
-        .id = id,
-        .node = creation.node.id,
-        .key = pin.key,
-        .label = pin.label,
-        .type = pin.type,
-        .direction = pin.direction,
-        .kind = pin.kind,
-        .cardinality = pin.cardinality,
-        .storage = PinStorage::Static,
-    });
+  for (auto& [key, value] : options.property_overrides) {
+      if (key.empty()) {
+          return std::unexpected(MakeError(
+              ErrorCode::InvalidArgument,
+              "Node property override key cannot be empty"));
+      }
+      creation.node.properties.insert_or_assign(std::move(key),
+                                                std::move(value));
   }
-  return creation;
+  auto descriptors = ResolveDescriptorPinSchema(*descriptor,
+                                                creation.node.properties);
+    if (!descriptors)
+        return std::unexpected(std::move(descriptors.error()));
+    creation.pins.reserve(descriptors->size());
+    creation.node.pins.reserve(descriptors->size());
+    for (const PinDescriptor& pin : *descriptors) {
+        const PinId id = document.AllocatePinId();
+        if (!id) {
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument,
+                                             "Pin ID space is exhausted"));
+        }
+        creation.node.pins.push_back(id);
+        creation.pins.push_back(PinInstance{
+            .id = id,
+            .node = creation.node.id,
+            .key = pin.key,
+            .label = pin.label,
+            .type = pin.type,
+            .direction = pin.direction,
+            .kind = pin.kind,
+            .cardinality = pin.cardinality,
+            .storage = PinStorage::Static,
+        });
+    }
+    creation.prepared_descriptor = descriptor;
+    return creation;
 }
 
 ConnectionResult RegistrySnapshot::Check(const TypeId &output,
@@ -442,9 +491,9 @@ ConversionRecipe::Instantiate(GraphDocument &document) const {
   creation.node.type_version = m_state->node_version;
   creation.node.display_name = m_state->display_name;
   creation.node.properties = m_state->default_properties;
-  creation.node.pins.reserve(m_state->static_pins.size());
-  creation.pins.reserve(m_state->static_pins.size());
-  for (const auto &pin : m_state->static_pins) {
+  creation.node.pins.reserve(m_state->pins.size());
+  creation.pins.reserve(m_state->pins.size());
+  for (const auto &pin : m_state->pins) {
     const PinId id = document.AllocatePinId();
     if (!id) {
       return std::unexpected(
@@ -474,12 +523,12 @@ bool ConversionRecipe::Matches(const NodeCreation &creation) const noexcept {
       creation.node.properties != m_state->default_properties ||
       creation.node.subgraph || creation.node.read_only ||
       creation.node.role != NodeRole::Regular ||
-      creation.node.pins.size() != m_state->static_pins.size() ||
-      creation.pins.size() != m_state->static_pins.size()) {
+      creation.node.pins.size() != m_state->pins.size() ||
+      creation.pins.size() != m_state->pins.size()) {
     return false;
   }
-  for (std::size_t index = 0; index < m_state->static_pins.size(); ++index) {
-    const PinDescriptor &expected = m_state->static_pins[index];
+  for (std::size_t index = 0; index < m_state->pins.size(); ++index) {
+    const PinDescriptor &expected = m_state->pins[index];
     const PinInstance &actual = creation.pins[index];
     if (!actual.id || creation.node.pins[index] != actual.id ||
         actual.node != creation.node.id || actual.key != expected.key ||
@@ -528,10 +577,28 @@ PropertyImpact RegistryCatalog::ResolvePropertyImpact(
   return Snapshot().ResolvePropertyImpact(type, key);
 }
 
+Result<std::vector<PinDescriptor>> RegistryCatalog::ResolvePinSchema(
+    const TypeId& type, const PropertyBag& properties) const {
+    const auto invocation = Detail::RegistryAccess::Invoke(*this);
+    return invocation.Snapshot().ResolvePinSchema(type, properties);
+}
+
+std::span<const PinDescriptor> RegistryCatalog::DefaultPinSchema(
+    const TypeId& type) const noexcept {
+    return Snapshot().DefaultPinSchema(type);
+}
+
+bool RegistryCatalog::PinSchemaDependsOn(
+    const TypeId& type, const std::string_view property) const noexcept {
+    return Snapshot().PinSchemaDependsOn(type, property);
+}
+
 Result<NodeCreation>
 RegistryCatalog::Instantiate(GraphDocument &document, const TypeId &type,
-                             const std::string_view display_name) const {
-  return Snapshot().Instantiate(document, type, display_name);
+                             NodeInstantiationOptions options) const {
+    const auto invocation = Detail::RegistryAccess::Invoke(*this);
+    return invocation.Snapshot().Instantiate(document, type,
+                                             std::move(options));
 }
 
 ConnectionResult RegistryCatalog::Check(const TypeId &output,
@@ -709,6 +776,7 @@ struct RegistryUpdate::Impl final {
   struct NodeOperation final {
     NodeOperationKind kind{NodeOperationKind::Register};
     NodeTypeDescriptor descriptor;
+    std::vector<PinDescriptor> default_pins;
     TypeId type;
   };
 
@@ -763,13 +831,16 @@ void PoisonRegistryUpdate(UpdateImpl &impl, Error error) {
 Result<void> RegistryUpdate::RegisterNodeType(NodeTypeDescriptor descriptor) {
   if (auto active = StageRegistryOperation(m_impl.get()); !active)
     return active;
-  if (auto valid = NormalizeNodeDescriptor(descriptor); !valid) {
-    PoisonRegistryUpdate(*m_impl, valid.error());
-    return valid;
+  const Detail::RegistryOwner::InvocationLease invocation{m_impl->owner};
+  auto default_pins = NormalizeNodeDescriptor(descriptor);
+  if (!default_pins) {
+    PoisonRegistryUpdate(*m_impl, default_pins.error());
+    return std::unexpected(std::move(default_pins.error()));
   }
   m_impl->node_operations.push_back(Impl::NodeOperation{
       .kind = Impl::NodeOperationKind::Register,
       .descriptor = std::move(descriptor),
+      .default_pins = std::move(*default_pins),
   });
   return {};
 }
@@ -777,13 +848,16 @@ Result<void> RegistryUpdate::RegisterNodeType(NodeTypeDescriptor descriptor) {
 Result<void> RegistryUpdate::ReplaceNodeType(NodeTypeDescriptor descriptor) {
   if (auto active = StageRegistryOperation(m_impl.get()); !active)
     return active;
-  if (auto valid = NormalizeNodeDescriptor(descriptor); !valid) {
-    PoisonRegistryUpdate(*m_impl, valid.error());
-    return valid;
+  const Detail::RegistryOwner::InvocationLease invocation{m_impl->owner};
+  auto default_pins = NormalizeNodeDescriptor(descriptor);
+  if (!default_pins) {
+    PoisonRegistryUpdate(*m_impl, default_pins.error());
+    return std::unexpected(std::move(default_pins.error()));
   }
   m_impl->node_operations.push_back(Impl::NodeOperation{
       .kind = Impl::NodeOperationKind::Replace,
       .descriptor = std::move(descriptor),
+      .default_pins = std::move(*default_pins),
   });
   return {};
 }
@@ -885,6 +959,7 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
         MakeError(ErrorCode::RevisionConflict,
                   "Registry generation changed while an update was staged"));
   }
+  const Detail::RegistryOwner::InvocationLease invocation{m_impl->owner};
 
   RegistryUpdateResult result{
       .generation = m_impl->base->generation,
@@ -913,6 +988,21 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
   const auto erase_descriptor = [&](const TypeId &type) {
     std::uint64_t copies = 0;
     candidate.descriptors.erase(type, &copies);
+    record_copies(copies);
+  };
+  const auto assign_default_pin_schema =
+      [&](const TypeId& type, std::vector<PinDescriptor> pins) {
+        std::uint64_t copies = 0;
+        candidate.default_pin_schemas.insert_or_assign(
+            type,
+            std::make_shared<const std::vector<PinDescriptor>>(
+                std::move(pins)),
+            &copies);
+        record_copies(copies);
+      };
+  const auto erase_default_pin_schema = [&](const TypeId& type) {
+    std::uint64_t copies = 0;
+    candidate.default_pin_schemas.erase(type, &copies);
     record_copies(copies);
   };
   const auto assign_conversion = [&](const ConversionKey &key,
@@ -993,33 +1083,30 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
       return std::unexpected(MakeError(
           ErrorCode::TypeNotFound, "Conversion node type is not registered"));
     }
-    const auto input = std::ranges::find(
-        (*node)->static_pins, descriptor.input_pin, &PinDescriptor::key);
-    const auto output = std::ranges::find(
-        (*node)->static_pins, descriptor.output_pin, &PinDescriptor::key);
-    if (input == (*node)->static_pins.end() ||
-        output == (*node)->static_pins.end() || input == output ||
-        input->direction != PinDirection::Input ||
-        output->direction != PinDirection::Output ||
-        input->type != descriptor.key.source_type ||
-        output->type != descriptor.key.destination_type ||
-        input->kind != descriptor.key.kind ||
-        output->kind != descriptor.key.kind) {
-      return std::unexpected(
-          MakeError(ErrorCode::InvalidArgument,
-                    "Conversion semantic pins do not match its key"));
+    const auto* default_pins =
+        candidate.default_pin_schemas.Find(descriptor.node_type);
+    if (default_pins == nullptr || *default_pins == nullptr) {
+      return std::unexpected(MakeError(
+          ErrorCode::TypeNotFound,
+          "Conversion node default pin schema is unavailable"));
+    }
+    const auto input = std::ranges::find(**default_pins, descriptor.input_pin, &PinDescriptor::key);
+    const auto output = std::ranges::find(**default_pins, descriptor.output_pin, &PinDescriptor::key);
+    if (input == (*default_pins)->end() || output == (*default_pins)->end() || input == output || input->direction != PinDirection::Input ||
+        output->direction != PinDirection::Output || input->type != descriptor.key.source_type || output->type != descriptor.key.destination_type ||
+        input->kind != descriptor.key.kind || output->kind != descriptor.key.kind) {
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Conversion semantic pins do not match its key"));
     }
     ++result.statistics.recipes_built;
-    return ConversionRecipe{
-        std::make_shared<const ConversionRecipe::State>(ConversionRecipe::State{
-            .registration = token,
-            .descriptor = std::move(descriptor),
-            .node_type = (*node)->type,
-            .node_version = (*node)->version,
-            .display_name = (*node)->display_name,
-            .default_properties = (*node)->default_properties,
-            .static_pins = (*node)->static_pins,
-        })};
+    return ConversionRecipe{std::make_shared<const ConversionRecipe::State>(ConversionRecipe::State{
+        .registration = token,
+        .descriptor = std::move(descriptor),
+        .node_type = (*node)->type,
+        .node_version = (*node)->version,
+        .display_name = (*node)->display_name,
+        .default_properties = (*node)->default_properties,
+        .pins = **default_pins,
+    })};
   };
 
   for (auto &operation : m_impl->node_operations) {
@@ -1036,6 +1123,7 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
       }
       assign_descriptor(type, std::make_shared<const NodeTypeDescriptor>(
                                   std::move(operation.descriptor)));
+      assign_default_pin_schema(type, std::move(operation.default_pins));
     } else if (operation.kind == Impl::NodeOperationKind::Replace) {
       if (current == nullptr) {
         return std::unexpected(
@@ -1047,12 +1135,14 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
       }
       assign_descriptor(type, std::make_shared<const NodeTypeDescriptor>(
                                   std::move(operation.descriptor)));
+      assign_default_pin_schema(type, std::move(operation.default_pins));
     } else {
       if (current == nullptr) {
         return std::unexpected(
             MakeError(ErrorCode::TypeNotFound, "Node type is not registered"));
       }
       erase_descriptor(type);
+      erase_default_pin_schema(type);
     }
   }
 
@@ -1195,13 +1285,11 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
     displaced_recipes.erase(id);
   }
 
-  const auto recipe_matches_node = [](const ConversionRecipe &recipe,
-                                      const NodeTypeDescriptor &node) {
-    return recipe.m_state->node_type == node.type &&
-           recipe.m_state->node_version == node.version &&
-           recipe.m_state->display_name == node.display_name &&
-           recipe.m_state->default_properties == node.default_properties &&
-           recipe.m_state->static_pins == node.static_pins;
+  const auto recipe_matches_node = [&](const ConversionRecipe& recipe, const NodeTypeDescriptor& node) {
+      const auto* default_pins = candidate.default_pin_schemas.Find(node.type);
+      return recipe.m_state->node_type == node.type && recipe.m_state->node_version == node.version && recipe.m_state->display_name == node.display_name &&
+             recipe.m_state->default_properties == node.default_properties && default_pins != nullptr && *default_pins != nullptr &&
+             recipe.m_state->pins == **default_pins;
   };
   for (const TypeId &type : touched_node_types) {
     const auto *registrations = candidate.registrations_by_node_type.Find(type);
@@ -1250,7 +1338,7 @@ Result<RegistryUpdateResult> RegistryUpdate::Commit() {
            left.m_state->display_name == right.m_state->display_name &&
            left.m_state->default_properties ==
                right.m_state->default_properties &&
-           left.m_state->static_pins == right.m_state->static_pins;
+           left.m_state->pins == right.m_state->pins;
   };
   bool conversion_changed = false;
   for (const std::uint64_t id : touched_registrations) {

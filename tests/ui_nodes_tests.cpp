@@ -54,7 +54,7 @@ NodeTypeDescriptor SourceDescriptor() {
         .type = TypeId{"test.source"},
         .display_name = "Source",
         .category = "Tests",
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{
                     .key = "value",
@@ -73,7 +73,7 @@ NodeTypeDescriptor SinkDescriptor() {
         .display_name = "Sink",
         .category = "Tests",
         .version = 2,
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{
                     .key = "value",
@@ -1482,7 +1482,7 @@ void TestCompatibilityOwnershipAndHistory() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"convert.int-float"},
                    .display_name = "Int to float",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "input", .type = TypeId{"int"}},
                            PinDescriptor{
@@ -1529,7 +1529,7 @@ void TestCompatibilityOwnershipAndHistory() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"ordered.static"},
                    .display_name = "Ordered static pins",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "first", .label = "First", .type = TypeId{"float"}},
                            PinDescriptor{.key = "second", .label = "Second", .type = TypeId{"float"}},
@@ -1641,7 +1641,7 @@ void TestTypeCompletionPoliciesAndProtection() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"stage3.int-source"},
                    .display_name = "Int source",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{
                                .key = "value",
@@ -1657,7 +1657,7 @@ void TestTypeCompletionPoliciesAndProtection() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"stage3.float-sink"},
                    .display_name = "Float sink",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "value", .type = TypeId{"float"}},
                        },
@@ -1668,7 +1668,7 @@ void TestTypeCompletionPoliciesAndProtection() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"stage3.float-source"},
                    .display_name = "Float source",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{
                                .key = "value",
@@ -1684,7 +1684,7 @@ void TestTypeCompletionPoliciesAndProtection() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"stage3.int-sink"},
                    .display_name = "Int sink",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "value", .type = TypeId{"int"}},
                        },
@@ -1695,7 +1695,7 @@ void TestTypeCompletionPoliciesAndProtection() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"stage3.int-to-float"},
                    .display_name = "Int to float",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "source", .type = TypeId{"int"}},
                            PinDescriptor{
@@ -2365,7 +2365,7 @@ void TestStageThreeCommandsFragmentsAndLayout() {
                    .type = TypeId{"test.bidirectional"},
                    .display_name = "Bidirectional",
                    .category = "Tests",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "input", .label = "Input", .type = TypeId{"float"}},
                            PinDescriptor{
@@ -2827,7 +2827,7 @@ void TestNodeUiExtensibility() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"ui.test"},
                    .display_name = "UI test",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{
                                .key = "output",
@@ -3635,37 +3635,37 @@ void TestStageFiveEditorGeometryCacheAndRouting() {
     const PinId output = document.AllocatePinId();
     const PinId input = document.AllocatePinId();
     Execute(commands,
-            std::make_unique<AddNodeCommand>(
-                graph,
-                NodeCreation{
-                    .node = NodeInstance{.id = source, .type = TypeId{"stage5.node"}, .display_name = "Source"},
-                    .pins = {PinInstance{
-                        .id = output,
-                        .node = source,
-                        .key = "out",
-                        .label = "Out",
-                        .type = TypeId{"float"},
-                        .direction = PinDirection::Output,
-                        .cardinality = PinCardinality::Multiple,
-                    }},
-                },
-                NodePresentation{.position = {20.0f, 20.0f}, .size = {200.0f, 100.0f}}),
+            std::make_unique<AddNodeCommand>(graph,
+                                             NodeCreation{
+                                                 .node = NodeInstance{.id = source, .type = TypeId{"stage5.node"}, .display_name = "Source"},
+                                                 .pins = {PinInstance{
+                                                     .id = output,
+                                                     .node = source,
+                                                     .key = "out",
+                                                     .label = "Out",
+                                                     .type = TypeId{"float"},
+                                                     .direction = PinDirection::Output,
+                                                     .cardinality = PinCardinality::Multiple,
+                                                     .storage = PinStorage::Dynamic,
+                                                 }},
+                                             },
+                                             NodePresentation{.position = {20.0f, 20.0f}, .size = {200.0f, 100.0f}}),
             document, presentation, types, "Stage-five source must be added");
     Execute(commands,
-            std::make_unique<AddNodeCommand>(
-                graph,
-                NodeCreation{
-                    .node = NodeInstance{.id = sink, .type = TypeId{"stage5.node"}, .display_name = "Sink"},
-                    .pins = {PinInstance{
-                        .id = input,
-                        .node = sink,
-                        .key = "in",
-                        .label = "In",
-                        .type = TypeId{"float"},
-                        .direction = PinDirection::Input,
-                    }},
-                },
-                NodePresentation{.position = {340.0f, 220.0f}, .size = {200.0f, 100.0f}}),
+            std::make_unique<AddNodeCommand>(graph,
+                                             NodeCreation{
+                                                 .node = NodeInstance{.id = sink, .type = TypeId{"stage5.node"}, .display_name = "Sink"},
+                                                 .pins = {PinInstance{
+                                                     .id = input,
+                                                     .node = sink,
+                                                     .key = "in",
+                                                     .label = "In",
+                                                     .type = TypeId{"float"},
+                                                     .direction = PinDirection::Input,
+                                                     .storage = PinStorage::Dynamic,
+                                                 }},
+                                             },
+                                             NodePresentation{.position = {340.0f, 220.0f}, .size = {200.0f, 100.0f}}),
             document, presentation, types, "Stage-five sink must be added");
     const LinkId link = document.AllocateLinkId();
     Execute(commands, std::make_unique<ConnectPinsCommand>(graph, Link{.id = link, .output = output, .input = input}),
@@ -4044,7 +4044,7 @@ void TestBreakingPolicyArchitecture() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"policy.int-source"},
                    .display_name = "Integer source",
-                   .static_pins = {PinDescriptor{
+                   .pin_schema = {PinDescriptor{
                        .key = "value",
                        .type = TypeId{"int"},
                        .direction = PinDirection::Output,
@@ -4057,7 +4057,7 @@ void TestBreakingPolicyArchitecture() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"policy.converter"},
                    .display_name = "Integer to float",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{
                                .key = "input",
@@ -5198,7 +5198,7 @@ void TestRegistryRevisionOverflowGuard() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = converter,
                    .display_name = "Overflow converter",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "input-a", .type = TypeId{"overflow.a"}},
                            PinDescriptor{
@@ -5333,7 +5333,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
             .type = TypeId{"registry.convert.data"},
             .display_name = "Data conversion",
             .version = 3,
-            .static_pins =
+            .pin_schema =
                 {
                     PinDescriptor{.key = "input", .type = TypeId{"int"}},
                     PinDescriptor{
@@ -5354,7 +5354,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"registry.convert.execution"},
                    .display_name = "Execution conversion",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{
                                .key = "input",
@@ -5447,7 +5447,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
                    .RegisterNodeType(NodeTypeDescriptor{
                        .type = TypeId{node_type},
                        .display_name = node_type,
-                       .static_pins =
+                       .pin_schema =
                            {
                                PinDescriptor{.key = "input", .type = TypeId{source}},
                                PinDescriptor{
@@ -5512,7 +5512,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
                    ->RegisterNodeType(NodeTypeDescriptor{
                        .type = TypeId{"registry.convert.reauth-pending"},
                        .display_name = "Reauthorization pending conversion",
-                       .static_pins =
+                       .pin_schema =
                            {
                                PinDescriptor{.key = "input", .type = TypeId{"matrix"}},
                                PinDescriptor{
@@ -5527,7 +5527,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
                    ->RegisterNodeType(NodeTypeDescriptor{
                        .type = TypeId{"registry.convert.reauth-blocked"},
                        .display_name = "Reauthorization blocked conversion",
-                       .static_pins =
+                       .pin_schema =
                            {
                                PinDescriptor{.key = "input", .type = TypeId{"packet"}},
                                PinDescriptor{
@@ -5597,7 +5597,7 @@ void TestConversionSnapshotsAndInvocationSafety() {
                    ->RegisterNodeType(NodeTypeDescriptor{
                        .type = TypeId{"registry.validation.convert"},
                        .display_name = "Validation conversion",
-                       .static_pins =
+                       .pin_schema =
                            {
                                PinDescriptor{.key = "input", .type = TypeId{"left"}},
                                PinDescriptor{
@@ -5666,7 +5666,7 @@ void TestConversionIdentityAndLifecycle() {
             .type = TypeId{ConverterType},
             .display_name = "Shared converter",
             .version = version,
-            .static_pins =
+            .pin_schema =
                 {
                     PinDescriptor{.key = "data-input", .type = source_type},
                     PinDescriptor{
@@ -5735,7 +5735,7 @@ void TestConversionIdentityAndLifecycle() {
     Expect(nodes.RegisterNodeType(NodeTypeDescriptor{
                                       .type = TypeId{"identity.execution-source"},
                                       .display_name = "Execution source",
-                                      .static_pins = {PinDescriptor{
+                                      .pin_schema = {PinDescriptor{
                                           .key = "value",
                                           .type = source_type,
                                           .direction = PinDirection::Output,
@@ -5748,7 +5748,7 @@ void TestConversionIdentityAndLifecycle() {
                    .RegisterNodeType(NodeTypeDescriptor{
                        .type = TypeId{"identity.execution-sink"},
                        .display_name = "Execution sink",
-                       .static_pins = {PinDescriptor{
+                       .pin_schema = {PinDescriptor{
                            .key = "value",
                            .type = destination_type,
                            .kind = PinKind::Execution,
@@ -5897,7 +5897,7 @@ void TestConversionIdentityAndLifecycle() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = TypeId{"workspace.lifecycle-converter"},
                    .display_name = "Workspace lifecycle converter",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "input", .type = TypeId{"workspace.a"}},
                            PinDescriptor{
@@ -5920,7 +5920,7 @@ void TestConversionIdentityAndLifecycle() {
                                              .type = TypeId{"workspace.lifecycle-converter"},
                                              .display_name = "Workspace lifecycle converter v2",
                                              .version = 2,
-                                             .static_pins =
+                                             .pin_schema =
                                                  {
                                                      PinDescriptor{.key = "input", .type = TypeId{"workspace.a"}},
                                                      PinDescriptor{
@@ -6144,7 +6144,7 @@ void TestRegistryCommandBoundaryAndAtomicUpdates() {
             .type = converter,
             .display_name = "Atomic converter",
             .version = version,
-            .static_pins =
+            .pin_schema =
                 {
                     PinDescriptor{.key = "data-in", .type = source},
                     PinDescriptor{
@@ -6266,7 +6266,7 @@ void TestRegistryNoOpsStructureAndSelectiveDependencies() {
     const NodeTypeDescriptor converter_v1{
         .type = converter,
         .display_name = "Contract converter",
-        .static_pins =
+        .pin_schema =
             {
                 PinDescriptor{.key = "input", .type = source},
                 PinDescriptor{.key = "alternate-input", .type = source},
@@ -6410,7 +6410,7 @@ void TestRegistryNoOpsStructureAndSelectiveDependencies() {
                .RegisterNodeType(NodeTypeDescriptor{
                    .type = conversion_node,
                    .display_name = "Dependency converter",
-                   .static_pins =
+                   .pin_schema =
                        {
                            PinDescriptor{.key = "ab-in", .type = ab_source},
                            PinDescriptor{.key = "ab-in-2", .type = ab_source},

@@ -254,53 +254,46 @@ std::vector<ValidationIssue> ValidateGraph(const GraphDocument &document,
       }
     }
     if (descriptor && node.type_version <= descriptor->version) {
-      std::vector<std::string_view> actual_static_order;
-      for (const auto &pin : node_pins) {
-        if (pin.storage == PinStorage::Static)
-          actual_static_order.push_back(pin.key);
-      }
-      const bool static_order_matches =
-          actual_static_order.size() == descriptor->static_pins.size() &&
-          std::ranges::equal(
-              actual_static_order, descriptor->static_pins,
-              [](const std::string_view actual, const PinDescriptor &expected) {
-                return actual == expected.key;
-              });
-      if (!static_order_matches) {
-        AddIssue(issues, ValidationSeverity::Error,
-                 "Descriptor-owned static pin order does not match the node "
-                 "descriptor",
-                 graph_id, node_id);
-      }
-      for (const auto &expected : descriptor->static_pins) {
-        const auto actual = pins_by_key.find(expected.key);
-        if (actual == pins_by_key.end()) {
-          AddIssue(issues, ValidationSeverity::Error,
-                   "Node is missing static pin '" + expected.key + "'",
-                   graph_id, node_id);
-          continue;
+        const auto resolved = registry.ResolvePinSchema(node.type, node.properties);
+        if (!resolved) {
+            AddIssue(issues, ValidationSeverity::Error, "Descriptor pin schema resolution failed: " + resolved.error().message, graph_id, node_id);
+        } else {
+            std::vector<std::string_view> actual_static_order;
+            for (const auto& pin : node_pins) {
+                if (pin.storage == PinStorage::Static)
+                    actual_static_order.push_back(pin.key);
+            }
+            const bool static_order_matches =
+                actual_static_order.size() == resolved->size() &&
+                std::ranges::equal(actual_static_order, *resolved,
+                                   [](const std::string_view actual, const PinDescriptor& expected) { return actual == expected.key; });
+            if (!static_order_matches) {
+                AddIssue(issues, ValidationSeverity::Error,
+                         "Descriptor-owned static pin order does not match the node "
+                         "descriptor projection",
+                         graph_id, node_id);
+            }
+            for (const auto& expected : *resolved) {
+                const auto actual = pins_by_key.find(expected.key);
+                if (actual == pins_by_key.end()) {
+                    AddIssue(issues, ValidationSeverity::Error, "Node is missing static pin '" + expected.key + "'", graph_id, node_id);
+                    continue;
+                }
+                const auto& pin = *actual->second;
+                if (pin.storage != PinStorage::Static || pin.label != expected.label || pin.type != expected.type || pin.direction != expected.direction ||
+                    pin.kind != expected.kind || pin.cardinality != expected.cardinality) {
+                    AddIssue(issues, ValidationSeverity::Error, "Static pin '" + expected.key + "' does not match its descriptor projection", graph_id, node_id,
+                             pin.id);
+                }
+            }
+            for (const auto& [key, pin] : pins_by_key) {
+                const bool declared_static = std::ranges::any_of(*resolved, [&](const PinDescriptor& expected) { return expected.key == key; });
+                if (pin->storage == PinStorage::Static && !declared_static) {
+                    AddIssue(issues, ValidationSeverity::Error, "Static pin '" + key + "' is not declared by the node descriptor projection", graph_id, node_id,
+                             pin->id);
+                }
+            }
         }
-        const auto &pin = *actual->second;
-        if (pin.storage != PinStorage::Static || pin.type != expected.type ||
-            pin.direction != expected.direction || pin.kind != expected.kind ||
-            pin.cardinality != expected.cardinality) {
-          AddIssue(issues, ValidationSeverity::Error,
-                   "Static pin '" + expected.key +
-                       "' does not match its descriptor",
-                   graph_id, node_id, pin.id);
-        }
-      }
-      for (const auto &[key, pin] : pins_by_key) {
-        const bool declared_static = std::ranges::any_of(
-            descriptor->static_pins,
-            [&](const PinDescriptor &expected) { return expected.key == key; });
-        if (pin->storage == PinStorage::Static && !declared_static) {
-          AddIssue(issues, ValidationSeverity::Error,
-                   "Static pin '" + key +
-                       "' is not declared by the node descriptor",
-                   graph_id, node_id, pin->id);
-        }
-      }
       if (descriptor->behavior && descriptor->behavior->validate) {
         const ValidateNodeFn validate = descriptor->behavior->validate;
         try {

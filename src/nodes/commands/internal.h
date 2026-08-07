@@ -59,6 +59,9 @@ template<typename Id> void Deduplicate(std::vector<Id>& values) {
         return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Prepared node creation does not match the current "
                                                                   "descriptor version or pin ownership"));
     }
+    auto resolved = registry.ResolvePinSchema(node.type, node.properties);
+    if (!resolved)
+        return std::unexpected(std::move(resolved.error()));
     std::size_t static_index = 0;
     for (std::size_t index = 0; index < pins.size(); ++index) {
         const PinInstance& pin = pins[index];
@@ -67,11 +70,11 @@ template<typename Id> void Deduplicate(std::vector<Id>& values) {
                 MakeError(ErrorCode::InvalidGraph, "Prepared node creation pin order does not match node ownership"));
         }
         if (pin.storage == PinStorage::Dynamic) continue;
-        if (static_index == current->static_pins.size()) {
+        if (static_index == resolved->size()) {
             return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Prepared node creation has static pins "
                                                                       "absent from the current descriptor"));
         }
-        const PinDescriptor& expected = current->static_pins[static_index++];
+        const PinDescriptor& expected = (*resolved)[static_index++];
         if (pin.key != expected.key || pin.label != expected.label || pin.type != expected.type ||
             pin.direction != expected.direction || pin.kind != expected.kind ||
             pin.cardinality != expected.cardinality || pin.node != node.id || pin.storage != PinStorage::Static) {
@@ -79,7 +82,7 @@ template<typename Id> void Deduplicate(std::vector<Id>& values) {
                                                                       "not match the current descriptor"));
         }
     }
-    if (static_index != current->static_pins.size()) {
+    if (static_index != resolved->size()) {
         return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Prepared node creation is missing static "
                                                                   "pins from the current descriptor"));
     }

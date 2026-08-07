@@ -67,7 +67,51 @@ namespace {
   });
 }
 
-[[nodiscard]] Result<void>
+[[nodiscard]] Result<void> NormalizePinDescriptors(std::vector<PinDescriptor>& pins) {
+    std::unordered_set<std::string> keys;
+    for (auto& pin : pins) {
+        if (pin.key.empty() || pin.type.Empty() || !ValidDirection(pin.direction) || !ValidKind(pin.kind) || !ValidCardinality(pin.cardinality)) {
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Node descriptor projection contains an invalid pin"));
+        }
+        if (!keys.insert(pin.key).second) {
+            return std::unexpected(MakeError(ErrorCode::DuplicateId, "Node descriptor projection contains duplicate pin semantic keys"));
+        }
+        if (pin.label.empty())
+            pin.label = pin.key;
+    }
+    return {};
+}
+
+[[nodiscard]] Result<std::vector<PinDescriptor>> ResolveDescriptorPinSchema(const NodeTypeDescriptor& descriptor,
+                                                                            const PropertyBag& properties) {
+    std::vector<PinDescriptor> pins;
+    if (descriptor.pin_schema.IsConfigurable()) {
+        const auto& configurable = descriptor.pin_schema.Configurable();
+        if (!configurable->resolve) {
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument,
+                                             "Configurable pin schema requires a resolver"));
+        }
+        try {
+            auto resolved = configurable->resolve(properties);
+            if (!resolved)
+                return std::unexpected(std::move(resolved.error()));
+            pins = std::move(*resolved);
+        } catch (const std::exception& exception) {
+            return std::unexpected(MakeError(ErrorCode::CommandFailed,
+                                             std::string{"Node pin schema resolution failed: "} + exception.what()));
+        } catch (...) {
+            return std::unexpected(MakeError(ErrorCode::CommandFailed,
+                                             "Node pin schema resolution failed with an unknown exception"));
+        }
+    } else {
+        pins = descriptor.pin_schema.FixedPins();
+    }
+    if (auto valid = NormalizePinDescriptors(pins); !valid)
+        return std::unexpected(std::move(valid.error()));
+    return pins;
+}
+
+[[nodiscard]] Result<std::vector<PinDescriptor>>
 NormalizeNodeDescriptor(NodeTypeDescriptor &descriptor) {
   if (descriptor.type.Empty() || descriptor.display_name.empty() ||
       descriptor.version == 0 ||
@@ -80,23 +124,28 @@ NormalizeNodeDescriptor(NodeTypeDescriptor &descriptor) {
                                      "Node descriptor requires a stable type, "
                                      "display name, and non-zero version"));
   }
-  std::unordered_set<std::string> keys;
-  for (auto &pin : descriptor.static_pins) {
-    if (pin.key.empty() || pin.type.Empty() || !ValidDirection(pin.direction) ||
-        !ValidKind(pin.kind) || !ValidCardinality(pin.cardinality)) {
-      return std::unexpected(
-          MakeError(ErrorCode::InvalidArgument,
-                    "Node descriptor contains an invalid pin"));
-    }
-    if (!keys.insert(pin.key).second) {
-      return std::unexpected(
-          MakeError(ErrorCode::DuplicateId,
-                    "Node descriptor contains duplicate pin semantic keys"));
-    }
-    if (pin.label.empty())
-      pin.label = pin.key;
+  if (!descriptor.pin_schema.IsConfigurable()) {
+      if (auto valid = NormalizePinDescriptors(descriptor.pin_schema.FixedPins()); !valid)
+          return std::unexpected(std::move(valid.error()));
+  } else {
+      const auto& configurable = descriptor.pin_schema.Configurable();
+      if (!configurable->resolve) {
+          return std::unexpected(MakeError(ErrorCode::InvalidArgument,
+                                           "Configurable pin schema requires a resolver"));
+      }
+      std::unordered_set<std::string> dependencies;
+      for (const std::string& property : configurable->property_dependencies) {
+          if (property.empty()) {
+              return std::unexpected(MakeError(ErrorCode::InvalidArgument,
+                                               "Pin schema property dependency cannot be empty"));
+          }
+          if (!dependencies.insert(property).second) {
+              return std::unexpected(MakeError(ErrorCode::DuplicateId,
+                                               "Pin schema contains duplicate property dependencies"));
+          }
+      }
   }
-  return {};
+  return ResolveDescriptorPinSchema(descriptor, descriptor.default_properties);
 }
 
 [[nodiscard]] ConnectionResult

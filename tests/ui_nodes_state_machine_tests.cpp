@@ -432,7 +432,7 @@ private:
             .type = TypeId{"state.node"},
             .display_name = "State node",
             .category = "Tests",
-            .static_pins = {
+            .pin_schema = {
                 PinDescriptor{
                     .key = "input",
                     .label = "Input",
@@ -453,7 +453,7 @@ private:
             Require(m_registry.RegisterNodeType(NodeTypeDescriptor{
                         .type = TypeId{converter},
                         .display_name = converter,
-                        .static_pins = {
+                        .pin_schema = {
                             PinDescriptor{.key = "input", .type = TypeId{"state.source"}},
                             PinDescriptor{
                                 .key = "output",
@@ -651,7 +651,8 @@ private:
     }
 
     void AddSetupNode(const std::size_t index) {
-        auto creation = m_registry.Instantiate(m_document, TypeId{"state.node"}, "Node " + std::to_string(index));
+        auto creation = m_registry.Instantiate(m_document, TypeId{"state.node"},
+                                               {.display_name = "Node " + std::to_string(index)});
         Require(creation.has_value(), "setup node instantiation failed");
         RememberCreation(*creation);
         SetupExecute(
@@ -1211,7 +1212,8 @@ private:
     void AddNode() {
         if (RegularNodes().size() >= MaximumRegularNodes) return DeleteNode();
         auto creation = m_registry.Instantiate(
-            m_document, TypeId{"state.node"}, "Random " + std::to_string(++m_mutation_serial));
+            m_document, TypeId{"state.node"},
+            {.display_name = "Random " + std::to_string(++m_mutation_serial)});
         if (!creation) Fail("random node instantiation failed: " + creation.error().message);
         RememberCreation(*creation);
         const NodeId id = creation->node.id;
