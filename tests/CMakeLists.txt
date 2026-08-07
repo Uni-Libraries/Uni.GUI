@@ -49,6 +49,14 @@ target_link_libraries(unigui_nodes_tests PRIVATE UniGUI::UniGUI)
 set_target_properties(unigui_nodes_tests PROPERTIES CXX_EXTENSIONS OFF)
 add_test(NAME unigui.nodes COMMAND unigui_nodes_tests)
 
+add_executable(unigui_nodes_pin_schema_tests
+    ui_nodes_pin_schema_tests.cpp
+)
+target_compile_features(unigui_nodes_pin_schema_tests PRIVATE cxx_std_23)
+target_link_libraries(unigui_nodes_pin_schema_tests PRIVATE UniGUI::UniGUI)
+set_target_properties(unigui_nodes_pin_schema_tests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME unigui.nodes-pin-schema COMMAND unigui_nodes_pin_schema_tests)
+
 add_executable(unigui_nodes_type_compatibility_tests
     ui_nodes_type_compatibility_tests.cpp
 )

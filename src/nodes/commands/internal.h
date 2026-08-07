@@ -11,6 +11,7 @@
 #include <limits>
 #include <set>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -23,6 +24,90 @@ namespace Uni::GUI::Nodes::CommandDetail {
 template<typename Id> void Deduplicate(std::vector<Id>& values) {
     std::unordered_set<Id, IdHash> seen;
     std::erase_if(values, [&](const Id id) { return !seen.insert(id).second; });
+}
+
+struct DescriptorPinPlan final {
+    std::vector<PinInstance> before;
+    std::vector<PinInstance> after;
+    std::vector<PinId> connection_changed;
+};
+
+[[nodiscard]] inline Result<DescriptorPinPlan> PlanDescriptorPins(
+    const GraphDocument& document, const GraphId graph, const NodeId node,
+    const std::span<const PinDescriptor> descriptors,
+    const std::function<PinId()>& allocate_pin_id) {
+    const auto* instance = document.FindNode(graph, node);
+    if (instance == nullptr) {
+        return std::unexpected(MakeError(ErrorCode::NodeNotFound, "Node does not exist"));
+    }
+
+    DescriptorPinPlan result;
+    std::unordered_map<std::string, const PinInstance*> current;
+    std::unordered_set<std::string> instance_keys;
+    for (const PinId id : instance->pins) {
+        const auto* pin = document.FindPin(graph, id);
+        if (pin == nullptr) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Node references a missing pin"));
+        }
+        if (pin->storage == PinStorage::Static) {
+            if (!current.emplace(pin->key, pin).second) {
+                return std::unexpected(MakeError(ErrorCode::DuplicateId,
+                                                 "Node contains duplicate descriptor pin keys"));
+            }
+            result.before.push_back(*pin);
+        } else {
+            instance_keys.insert(pin->key);
+        }
+    }
+
+    std::unordered_set<std::string> resolved_keys;
+    result.after.reserve(descriptors.size());
+    for (const PinDescriptor& descriptor : descriptors) {
+        if (!resolved_keys.insert(descriptor.key).second ||
+            instance_keys.contains(descriptor.key)) {
+            return std::unexpected(MakeError(
+                ErrorCode::DuplicateId,
+                "Descriptor pin key conflicts with another node pin"));
+        }
+        const auto retained = current.find(descriptor.key);
+        PinId id;
+        bool read_only = false;
+        if (retained != current.end()) {
+            id = retained->second->id;
+            read_only = retained->second->read_only;
+        } else {
+            id = allocate_pin_id();
+            if (!id) {
+                return std::unexpected(MakeError(ErrorCode::InvalidArgument,
+                                                 "Pin ID space is exhausted"));
+            }
+        }
+        PinInstance pin{
+            .id = id,
+            .node = node,
+            .key = descriptor.key,
+            .label = descriptor.label,
+            .type = descriptor.type,
+            .direction = descriptor.direction,
+            .kind = descriptor.kind,
+            .cardinality = descriptor.cardinality,
+            .storage = PinStorage::Static,
+            .read_only = read_only,
+        };
+        if (retained != current.end()) {
+            const PinInstance& before = *retained->second;
+            if (before.type != pin.type || before.direction != pin.direction ||
+                before.kind != pin.kind || before.cardinality != pin.cardinality) {
+                result.connection_changed.push_back(id);
+            }
+        }
+        result.after.push_back(std::move(pin));
+    }
+    for (const auto& [key, pin] : current) {
+        if (!resolved_keys.contains(key))
+            result.connection_changed.push_back(pin->id);
+    }
+    return result;
 }
 
 [[nodiscard]] inline bool Finite(const Vec2 value) noexcept {

@@ -155,7 +155,7 @@ void GraphTransaction::Impl::RecordGraphReplaced(const Graph& before, const Grap
                     PinOperation{after.id, replacement->node, pin_id, PinOperation::NoIndex,
                                  after.pins.SharedAt(pin_id)}});
         } else {
-            Record({OperationKind::UpdateDynamicPin, OperationAction::Set,
+            Record({OperationKind::UpdatePin, OperationAction::Set,
                     PinOperation{after.id, replacement->node, pin_id, PinOperation::NoIndex,
                                  after.pins.SharedAt(pin_id)}});
         }

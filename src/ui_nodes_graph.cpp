@@ -1502,6 +1502,98 @@ Result<void> GraphDocument::ReorderDynamicPins(const GraphId graph_id, const Nod
     return {};
 }
 
+Result<void> GraphDocument::SetDescriptorPins(const GraphId graph_id, const NodeId node_id, const std::span<const PinInstance> pins) {
+    auto* graph = FindGraphMutable(graph_id);
+    if (graph == nullptr) {
+        return std::unexpected(MakeError(ErrorCode::GraphNotFound, "Graph does not exist"));
+    }
+    const auto node_found = graph->nodes.find(node_id);
+    if (node_found == graph->nodes.end()) {
+        return std::unexpected(MakeError(ErrorCode::NodeNotFound, "Node does not exist"));
+    }
+
+    std::unordered_map<std::string, PinInstance> current_static;
+    std::unordered_map<PinId, PinInstance, IdHash> current_static_by_id;
+    std::vector<PinId> dynamic_pins;
+    std::unordered_set<std::string> keys;
+    for (const PinId id : node_found->second.pins) {
+        const auto found = graph->pins.find(id);
+        if (found == graph->pins.end() || found->second.node != node_id || !keys.insert(found->second.key).second) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Node pin ownership is invalid"));
+        }
+        if (found->second.storage == PinStorage::Static) {
+            current_static.emplace(found->second.key, found->second);
+            current_static_by_id.emplace(id, found->second);
+        } else {
+            dynamic_pins.push_back(id);
+        }
+    }
+
+    std::unordered_set<PinId, IdHash> supplied_ids;
+    std::unordered_set<std::string> supplied_keys;
+    for (const PinInstance& pin : pins) {
+        if (!pin.id || pin.node != node_id || pin.key.empty() || pin.type.Empty() || pin.storage != PinStorage::Static || !ValidDirection(pin.direction) ||
+            !ValidKind(pin.kind) || !ValidCardinality(pin.cardinality)) {
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Descriptor pin projection contains invalid metadata"));
+        }
+        if (!supplied_ids.insert(pin.id).second || !supplied_keys.insert(pin.key).second) {
+            return std::unexpected(MakeError(ErrorCode::DuplicateId, "Descriptor pin projection contains duplicate IDs or keys"));
+        }
+        if (keys.contains(pin.key) && !current_static.contains(pin.key)) {
+            return std::unexpected(MakeError(ErrorCode::DuplicateId, "Projected pin semantic key conflicts with a dynamic pin"));
+        }
+        if (const auto current = current_static.find(pin.key); current != current_static.end() && current->second.id != pin.id) {
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Retained descriptor pin semantic keys must preserve their IDs"));
+        }
+        if (const auto owner = m_impl->indexes.pin_owners.find(pin.id); owner != m_impl->indexes.pin_owners.end()) {
+            const auto current = current_static_by_id.find(pin.id);
+            if (owner->second.graph != graph_id || owner->second.node != node_id || current == current_static_by_id.end() || current->second.key != pin.key) {
+                return std::unexpected(MakeError(ErrorCode::DuplicateId, "Projected pin ID belongs to another semantic pin"));
+            }
+        }
+    }
+
+    for (const auto& [key, pin] : current_static) {
+        if (supplied_keys.contains(key))
+            continue;
+        if (!IncidentLinks(pin.id).empty() || IntergraphLinkForPin(pin.id)) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Descriptor pin links must be removed before the pin projection changes"));
+        }
+    }
+
+    for (const auto& [key, pin] : current_static) {
+        if (supplied_keys.contains(key))
+            continue;
+        graph->pins.erase(pin.id);
+        m_impl->indexes.RemovePin(pin.id);
+    }
+    for (const PinInstance& pin : pins) {
+        const bool existing = current_static_by_id.contains(pin.id);
+        graph->pins.insert_or_assign(pin.id, pin);
+        if (!existing) {
+            m_impl->pin_ids.Observe(pin.id);
+            m_impl->indexes.AddPin(graph_id, pin);
+        }
+    }
+
+    NodeInstance projected = node_found->second;
+    projected.pins.clear();
+    projected.pins.reserve(pins.size() + dynamic_pins.size());
+    std::size_t descriptor_index = 0;
+    for (const PinId id : node_found->second.pins) {
+        if (current_static_by_id.contains(id)) {
+            if (descriptor_index < pins.size())
+                projected.pins.push_back(pins[descriptor_index++].id);
+        } else {
+            projected.pins.push_back(id);
+        }
+    }
+    while (descriptor_index < pins.size())
+        projected.pins.push_back(pins[descriptor_index++].id);
+    graph->nodes.insert_or_assign(node_id, std::move(projected));
+    return {};
+}
+
 Result<void> GraphDocument::AddLink(const GraphId graph_id, Link link) {
     auto* graph = FindGraphMutable(graph_id);
     if (graph == nullptr) {

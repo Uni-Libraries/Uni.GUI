@@ -545,6 +545,127 @@ Result<void> GraphTransaction::ReorderDynamicPins(const GraphId graph, const Nod
     return result;
 }
 
+Result<void> GraphTransaction::SetDescriptorPins(const GraphId graph, const NodeId node, const std::span<const PinInstance> pins) {
+    const auto* target = Document().FindGraph(graph);
+    const auto* current = Document().FindNode(graph, node);
+    if (current == nullptr || target == nullptr) {
+        return std::unexpected(MakeError(current == nullptr ? ErrorCode::NodeNotFound : ErrorCode::GraphNotFound,
+                                         current == nullptr ? "Node does not exist" : "Graph does not exist"));
+    }
+    if (m_impl->enforce_protection && (m_impl->GraphReadOnly(graph) || m_impl->NodeReadOnly(graph, node))) {
+        return std::unexpected(MakeError(ErrorCode::ReadOnly, "Graph or node is read-only"));
+    }
+
+    std::unordered_set<std::string> projected_keys;
+    for (const PinInstance& pin : pins)
+        projected_keys.insert(pin.key);
+
+    std::vector<PinId> dynamic_pins;
+    std::unordered_map<PinId, PinInstance, IdHash> before_by_id;
+    std::unordered_map<PinId, std::shared_ptr<const PinInstance>, IdHash> before_handles;
+    for (const PinId id : current->pins) {
+        const auto* pin = Document().FindPin(graph, id);
+        if (pin == nullptr) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Node references a missing pin"));
+        }
+        if (pin->storage == PinStorage::Dynamic) {
+            dynamic_pins.push_back(id);
+            continue;
+        }
+        before_by_id.emplace(id, *pin);
+        before_handles.emplace(id, target->pins.SharedAt(id));
+        if (projected_keys.contains(pin->key))
+            continue;
+        if (m_impl->enforce_protection && m_impl->PinReadOnly(graph, id)) {
+            return std::unexpected(MakeError(ErrorCode::ReadOnly, "Removed descriptor pin is read-only"));
+        }
+        for (const LinkId link : Document().IncidentLinks(id)) {
+            if (m_impl->enforce_protection) {
+                if (auto removable = m_impl->CheckLinkRemoval(graph, link); !removable)
+                    return removable;
+            }
+        }
+        if (Document().IntergraphLinkForPin(id)) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Descriptor pin intergraph links must be removed before reprojection"));
+        }
+    }
+
+    std::vector<PinId> projected_order;
+    projected_order.reserve(pins.size() + dynamic_pins.size());
+    std::unordered_map<PinId, PinInstance, IdHash> after_by_id;
+    for (const PinInstance& pin : pins) {
+        after_by_id.emplace(pin.id, pin);
+        if (const auto before = before_by_id.find(pin.id);
+            m_impl->enforce_protection && before != before_by_id.end() &&
+            ((before->second.read_only && before->second != pin) ||
+             before->second.read_only != pin.read_only)) {
+            return std::unexpected(MakeError(
+                ErrorCode::ReadOnly,
+                "Read-only descriptor pin cannot be changed by schema resolution"));
+        }
+    }
+    std::size_t descriptor_index = 0;
+    for (const PinId id : current->pins) {
+        if (before_by_id.contains(id)) {
+            if (descriptor_index < pins.size())
+                projected_order.push_back(pins[descriptor_index++].id);
+        } else {
+            projected_order.push_back(id);
+        }
+    }
+    while (descriptor_index < pins.size())
+        projected_order.push_back(pins[descriptor_index++].id);
+
+    std::size_t pin_changes = 0;
+    for (const auto& [id, pin] : before_by_id) {
+        const auto after = after_by_id.find(id);
+        if (after == after_by_id.end() || after->second != pin)
+            ++pin_changes;
+    }
+    for (const auto& [id, pin] : after_by_id) {
+        (void)pin;
+        if (!before_by_id.contains(id))
+            ++pin_changes;
+    }
+    if (pin_changes == 0 && current->pins == projected_order)
+        return {};
+
+    if (auto budget = m_impl->ConsumeOperations(pin_changes + 1); !budget)
+        return budget;
+    auto result = m_impl->staged_document.SetDescriptorPins(graph, node, pins);
+    if (!result) {
+        m_impl->ReleaseOperations(pin_changes + 1);
+        return result;
+    }
+
+    m_impl->model_changed = true;
+    m_impl->TouchNode(graph, node, SemanticDomain::Topology | SemanticDomain::Layout);
+    const auto* after_graph = Document().FindGraph(graph);
+    m_impl->Record({OperationKind::UpdateNode, OperationAction::Set, NodeOperation{graph, node, after_graph->nodes.SharedAt(node), {}}});
+    for (const auto& [id, pin] : before_by_id) {
+        const auto after = after_by_id.find(id);
+        if (after != after_by_id.end() && after->second == pin)
+            continue;
+        m_impl->TouchPin(graph, id, SemanticDomain::Topology | SemanticDomain::Layout);
+        if (after == after_by_id.end()) {
+            m_impl->Record({OperationKind::RemovePin, OperationAction::Erase,
+                            PinOperation{graph, node, id, PinOperation::NoIndex,
+                                         before_handles.at(id)}});
+        } else {
+            m_impl->Record(
+                {OperationKind::UpdatePin, OperationAction::Set, PinOperation{graph, node, id, PinOperation::NoIndex, after_graph->pins.SharedAt(id)}});
+        }
+    }
+    for (const auto& [id, pin] : after_by_id) {
+        (void)pin;
+        if (before_by_id.contains(id))
+            continue;
+        m_impl->TouchPin(graph, id, SemanticDomain::Topology | SemanticDomain::Layout);
+        m_impl->Record({OperationKind::AddPin, OperationAction::Set, PinOperation{graph, node, id, PinOperation::NoIndex, after_graph->pins.SharedAt(id)}});
+    }
+    return {};
+}
+
 Result<void> GraphTransaction::AddLink(const GraphId graph, Link link, std::optional<Link> replacing) {
     if (replacing) {
         auto authorization = AuthorizeConnection(ConnectionRequest{graph, link.output, link.input, replacing->id});
@@ -615,7 +736,41 @@ Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId
     const auto* current = Document().FindNode(graph, node);
     const PropertyImpact impact =
         current != nullptr ? ResolvePropertyImpact(current->type, key) : PropertyImpact::Topology;
-    return SetNodePropertyWithImpact(graph, node, std::move(key), std::move(value), impact);
+    if (current == nullptr || !m_impl->registry.PinSchemaDependsOn(current->type, key)) {
+        return SetNodePropertyWithImpact(graph, node, std::move(key), std::move(value), impact);
+    }
+    const auto descriptor = m_impl->registry.Find(current->type);
+    if (!descriptor || current->type_version != descriptor->version) {
+        return std::unexpected(MakeError(
+            ErrorCode::RevisionConflict,
+            "Node pin schema requires the exact registered descriptor version"));
+    }
+
+    PropertyBag properties = current->properties;
+    if (value)
+        properties.insert_or_assign(key, *value);
+    else
+        properties.erase(key);
+    auto resolved = m_impl->registry.ResolvePinSchema(current->type, properties);
+    if (!resolved)
+        return std::unexpected(std::move(resolved.error()));
+    auto plan = CommandDetail::PlanDescriptorPins(
+        Document(), graph, node, *resolved, [&] { return AllocatePinId(); });
+    if (!plan)
+        return std::unexpected(std::move(plan.error()));
+    for (const PinId pin : plan->connection_changed) {
+        if (!Document().IncidentLinks(pin).empty() || Document().IntergraphLinkForPin(pin)) {
+            return std::unexpected(MakeError(
+                ErrorCode::IncompatiblePins,
+                "Property change requires explicit disconnection of incompatible pin links"));
+        }
+    }
+    if (auto property = SetNodePropertyWithImpact(graph, node, std::move(key),
+                                                  std::move(value), impact);
+        !property) {
+        return property;
+    }
+    return SetDescriptorPins(graph, node, plan->after);
 }
 
 PropertyImpact GraphTransaction::ResolvePropertyImpact(const TypeId& type, const std::string_view key) const noexcept {

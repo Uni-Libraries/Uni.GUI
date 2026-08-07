@@ -6,6 +6,7 @@ using CommandDetail::Deduplicate;
 using CommandDetail::Finite;
 using CommandDetail::MakeError;
 using CommandDetail::OwnedClosure;
+using CommandDetail::PlanDescriptorPins;
 
 struct AddNodeCommand::Impl final {
     GraphId graph;
@@ -319,13 +320,25 @@ Result<void> MoveNodesCommand::Revert(GraphTransaction& transaction) {
 }
 
 struct SetNodePropertyCommand::Impl final {
+    struct LinkState final {
+        Link link;
+        std::optional<LinkPresentation> presentation;
+    };
+
     GraphId graph;
     NodeId node;
     std::string key;
     std::optional<PropertyValue> value;
     std::optional<PropertyValue> previous;
     std::optional<PropertyImpact> impact;
+    std::vector<PinInstance> previous_pins;
+    std::vector<PinInstance> projected_pins;
+    std::vector<LinkState> removed_links;
+    std::vector<IntergraphLink> removed_intergraph_links;
+    NodeTypeDescriptorPtr descriptor;
     Edit edit;
+    InvalidConnectionPolicy invalid_connections{InvalidConnectionPolicy::Disconnect};
+    bool reproject_descriptor_pins{false};
     bool merge_open{false};
     bool captured{false};
 };
@@ -334,20 +347,35 @@ SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId
                                                std::optional<PropertyValue> value)
     : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), Edit{}) {}
 SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+                                               std::optional<PropertyValue> value,
+                                               const InvalidConnectionPolicy invalid_connections)
+    : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), Edit{}, invalid_connections) {}
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
                                                std::optional<PropertyValue> value, const Edit edit)
+    : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), edit,
+                             InvalidConnectionPolicy::Disconnect) {}
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+                                               std::optional<PropertyValue> value, const Edit edit,
+                                               const InvalidConnectionPolicy invalid_connections)
     : m_impl(std::make_unique<Impl>(Impl{
           .graph = graph,
           .node = node,
           .key = std::move(key),
           .value = std::move(value),
           .edit = edit,
+          .invalid_connections = invalid_connections,
           .merge_open = edit.merge_key != 0 && !edit.final,
       })) {}
 SetNodePropertyCommand::~SetNodePropertyCommand() = default;
 std::string_view SetNodePropertyCommand::Name() const noexcept {
     return "Set node property";
 }
-Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const RegistrySnapshot&) {
+Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const RegistrySnapshot& registry) {
+    if (m_impl->captured && m_impl->descriptor && registry.Find(m_impl->descriptor->type) != m_impl->descriptor) {
+        return std::unexpected(MakeError(
+            ErrorCode::RevisionConflict,
+            "Node pin schema descriptor changed after the property command was prepared"));
+    }
     if (!m_impl->captured) {
         const auto* node = transaction.Document().FindNode(m_impl->graph, m_impl->node);
         if (node == nullptr) {
@@ -357,20 +385,172 @@ Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const 
             m_impl->previous = found->second;
         }
         m_impl->impact = transaction.ResolvePropertyImpact(node->type, m_impl->key);
+        m_impl->reproject_descriptor_pins = registry.PinSchemaDependsOn(node->type, m_impl->key);
+        if (m_impl->reproject_descriptor_pins) {
+            m_impl->descriptor = registry.Find(node->type);
+            if (!m_impl->descriptor || node->type_version != m_impl->descriptor->version) {
+                return std::unexpected(MakeError(
+                    ErrorCode::RevisionConflict,
+                    "Node pin schema requires the exact registered descriptor version"));
+            }
+            PropertyBag properties = node->properties;
+            if (m_impl->value) {
+                properties.insert_or_assign(m_impl->key, *m_impl->value);
+            } else {
+                properties.erase(m_impl->key);
+            }
+            auto projected = registry.ResolvePinSchema(node->type, properties);
+            if (!projected)
+                return std::unexpected(std::move(projected.error()));
+
+            auto plan = PlanDescriptorPins(
+                transaction.Document(), m_impl->graph, m_impl->node, *projected,
+                [&] { return transaction.AllocatePinId(); });
+            if (!plan)
+                return std::unexpected(std::move(plan.error()));
+            m_impl->previous_pins = std::move(plan->before);
+            m_impl->projected_pins = std::move(plan->after);
+
+            std::unordered_set<LinkId, IdHash> incident_links;
+            std::unordered_set<IntergraphLinkId, IdHash> intergraph_links;
+            std::unordered_map<PinId, const PinInstance*, IdHash> projected_by_id;
+            std::unordered_set<PinId, IdHash> previous_descriptor_ids;
+            for (const PinInstance& pin : m_impl->previous_pins)
+                previous_descriptor_ids.insert(pin.id);
+            for (const PinInstance& pin : m_impl->projected_pins)
+                projected_by_id.emplace(pin.id, &pin);
+            const auto resolved_pin = [&](const PinId id) -> const PinInstance* {
+                const auto projected_pin = projected_by_id.find(id);
+                if (projected_pin != projected_by_id.end())
+                    return projected_pin->second;
+                return previous_descriptor_ids.contains(id)
+                           ? nullptr
+                           : transaction.Document().FindPin(m_impl->graph, id);
+            };
+            const auto local_link_valid = [&](const Link& link) {
+                const auto* output = resolved_pin(link.output);
+                const auto* input = resolved_pin(link.input);
+                if (output == nullptr || input == nullptr ||
+                    output->direction != PinDirection::Output ||
+                    input->direction != PinDirection::Input || output->kind != input->kind) {
+                    return false;
+                }
+                if ((output->cardinality == PinCardinality::Single &&
+                     transaction.Document().IncidentLinks(output->id).size() > 1) ||
+                    (input->cardinality == PinCardinality::Single &&
+                     transaction.Document().IncidentLinks(input->id).size() > 1)) {
+                    return false;
+                }
+                return registry.Check(output->type, input->type, output->kind).status ==
+                       ConnectionResult::Status::Allowed;
+            };
+            for (const PinId pin : plan->connection_changed) {
+                for (const LinkId link_id : transaction.Document().IncidentLinks(pin)) {
+                    const auto* link = transaction.Document().FindLink(m_impl->graph, link_id);
+                    if (link == nullptr || !local_link_valid(*link))
+                        incident_links.insert(link_id);
+                }
+                if (const IntergraphLinkId link_id = transaction.Document().IntergraphLinkForPin(pin)) {
+                    const auto* link = transaction.Document().FindIntergraphLink(link_id);
+                    if (link == nullptr) {
+                        intergraph_links.insert(link_id);
+                    } else {
+                        const auto* source = link->source.graph == m_impl->graph
+                                                 ? resolved_pin(link->source.pin)
+                                                 : transaction.Document().FindPin(link->source.graph, link->source.pin);
+                        const auto* destination = link->destination.graph == m_impl->graph
+                                                      ? resolved_pin(link->destination.pin)
+                                                      : transaction.Document().FindPin(link->destination.graph,
+                                                                                       link->destination.pin);
+                        if (source == nullptr || destination == nullptr ||
+                            source->direction != PinDirection::Input ||
+                            destination->direction != PinDirection::Output ||
+                            source->type != destination->type || source->kind != destination->kind) {
+                            intergraph_links.insert(link_id);
+                        }
+                    }
+                }
+            }
+            std::vector<LinkId> ordered_links(incident_links.begin(), incident_links.end());
+            std::ranges::sort(ordered_links);
+            for (const LinkId id : ordered_links) {
+                const auto* link = transaction.Document().FindLink(m_impl->graph, id);
+                if (link == nullptr) {
+                    return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Incident link does not exist"));
+                }
+                const auto* presentation = transaction.Presentation().FindLink(id);
+                m_impl->removed_links.push_back(Impl::LinkState{
+                    .link = *link,
+                    .presentation = presentation ? std::optional<LinkPresentation>{*presentation} : std::nullopt,
+                });
+            }
+            std::vector<IntergraphLinkId> ordered_intergraph(intergraph_links.begin(), intergraph_links.end());
+            std::ranges::sort(ordered_intergraph);
+            for (const IntergraphLinkId id : ordered_intergraph) {
+                const auto* link = transaction.Document().FindIntergraphLink(id);
+                if (link == nullptr) {
+                    return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Incident intergraph link does not exist"));
+                }
+                m_impl->removed_intergraph_links.push_back(*link);
+            }
+            if (m_impl->invalid_connections == InvalidConnectionPolicy::Reject &&
+                (!m_impl->removed_links.empty() || !m_impl->removed_intergraph_links.empty())) {
+                return std::unexpected(MakeError(
+                    ErrorCode::IncompatiblePins,
+                    "Resolved pin schema would invalidate existing connections"));
+            }
+        }
         m_impl->captured = true;
     }
-    return transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->value,
-                                                 *m_impl->impact);
+
+    for (const IntergraphLink& link : m_impl->removed_intergraph_links) {
+        if (auto removed = transaction.RemoveIntergraphLink(link.id); !removed)
+            return std::unexpected(std::move(removed.error()));
+    }
+    for (const Impl::LinkState& state : m_impl->removed_links) {
+        if (auto presentation = transaction.SetLinkPresentation(state.link.id, std::nullopt); !presentation)
+            return presentation;
+        if (auto removed = transaction.RemoveLink(m_impl->graph, state.link.id); !removed)
+            return std::unexpected(std::move(removed.error()));
+    }
+    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->value, *m_impl->impact); !property) {
+        return property;
+    }
+    if (m_impl->reproject_descriptor_pins)
+        return transaction.SetDescriptorPins(m_impl->graph, m_impl->node, m_impl->projected_pins);
+    return {};
 }
 Result<void> SetNodePropertyCommand::Revert(GraphTransaction& transaction) {
-    return transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->previous,
-                                                 *m_impl->impact);
+    if (m_impl->descriptor && transaction.Registry().Find(m_impl->descriptor->type) != m_impl->descriptor) {
+        return std::unexpected(MakeError(
+            ErrorCode::RevisionConflict,
+            "Node pin schema descriptor changed after the property command was prepared"));
+    }
+    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->previous, *m_impl->impact); !property) {
+        return property;
+    }
+    if (m_impl->reproject_descriptor_pins) {
+        if (auto pins = transaction.SetDescriptorPins(m_impl->graph, m_impl->node, m_impl->previous_pins); !pins)
+            return pins;
+    }
+    for (const Impl::LinkState& state : m_impl->removed_links) {
+        if (auto link = transaction.AddLink(m_impl->graph, state.link); !link)
+            return link;
+        if (auto presentation = transaction.SetLinkPresentation(state.link.id, state.presentation); !presentation)
+            return presentation;
+    }
+    for (const IntergraphLink& link : m_impl->removed_intergraph_links) {
+        if (auto restored = transaction.AddIntergraphLink(link); !restored)
+            return restored;
+    }
+    return {};
 }
 bool SetNodePropertyCommand::TryMerge(const Command& newer) {
     const auto* property = dynamic_cast<const SetNodePropertyCommand*>(&newer);
-    if (property == nullptr || !m_impl->merge_open || m_impl->edit.merge_key == 0 ||
-        m_impl->edit.merge_key != property->m_impl->edit.merge_key || m_impl->graph != property->m_impl->graph ||
-        m_impl->node != property->m_impl->node || m_impl->key != property->m_impl->key) {
+    if (property == nullptr || !m_impl->merge_open || m_impl->edit.merge_key == 0 || m_impl->edit.merge_key != property->m_impl->edit.merge_key ||
+        m_impl->graph != property->m_impl->graph || m_impl->node != property->m_impl->node || m_impl->key != property->m_impl->key ||
+        m_impl->invalid_connections != property->m_impl->invalid_connections || m_impl->reproject_descriptor_pins ||
+        property->m_impl->reproject_descriptor_pins) {
         return false;
     }
     if (property->m_impl->edit.begin) {

@@ -1127,6 +1127,7 @@ class UNI_GUI_EXPORT GraphDocument final {
     [[nodiscard]] Result<void> RestoreDynamicPin(GraphId graph, RemovedPin removed);
     [[nodiscard]] Result<void> UpdateDynamicPin(GraphId graph, PinInstance pin);
     [[nodiscard]] Result<void> ReorderDynamicPins(GraphId graph, NodeId node, std::vector<PinId> order);
+    [[nodiscard]] Result<void> SetDescriptorPins(GraphId graph, NodeId node, std::span<const PinInstance> pins);
     [[nodiscard]] Result<void> AddLink(GraphId graph, Link link);
     [[nodiscard]] Result<Link> RemoveLink(GraphId graph, LinkId link);
     [[nodiscard]] Result<void> SetNodeProperty(GraphId graph, NodeId node, std::string key,

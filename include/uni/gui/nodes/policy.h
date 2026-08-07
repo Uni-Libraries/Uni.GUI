@@ -50,6 +50,7 @@ enum class OperationKind {
     UpdateNode,
     AddPin,
     RemovePin,
+    UpdatePin,
 };
 
 enum class OperationAction { Set, Erase };

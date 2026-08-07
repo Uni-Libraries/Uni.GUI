@@ -167,6 +167,7 @@ class UNI_GUI_EXPORT GraphTransaction final {
     [[nodiscard]] PropertyImpact ResolvePropertyImpact(const TypeId& type, std::string_view key) const noexcept;
     [[nodiscard]] Result<void> SetNodePropertyWithImpact(GraphId graph, NodeId node, std::string key,
                                                          std::optional<PropertyValue> value, PropertyImpact impact);
+    [[nodiscard]] Result<void> SetDescriptorPins(GraphId graph, NodeId node, std::span<const PinInstance> pins);
     [[nodiscard]] Result<void> ReplaceGraph(Graph graph);
 
     struct Impl;
@@ -370,6 +371,11 @@ class UNI_GUI_EXPORT MoveNodesCommand final : public Command {
     UNI_GUI_NODE_COMMAND_DECLARATION(MoveNodesCommand);
 };
 
+enum class InvalidConnectionPolicy {
+    Disconnect,
+    Reject,
+};
+
 class UNI_GUI_EXPORT SetNodePropertyCommand final : public Command {
   public:
     struct Edit final {
@@ -379,7 +385,11 @@ class UNI_GUI_EXPORT SetNodePropertyCommand final : public Command {
     };
 
     SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value);
+    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value,
+                           InvalidConnectionPolicy invalid_connections);
     SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value, Edit edit);
+    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value, Edit edit,
+                           InvalidConnectionPolicy invalid_connections);
     UNI_GUI_NODE_COMMAND_DECLARATION(SetNodePropertyCommand);
     [[nodiscard]] bool TryMerge(const Command& newer) override;
 };
