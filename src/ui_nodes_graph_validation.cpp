@@ -96,25 +96,11 @@ namespace {
 }
 
 [[nodiscard]] bool ValidPropertyValue(const PropertyValue& value) noexcept {
-    return std::visit(
-        [](const auto& property) noexcept {
-            using Value = std::decay_t<decltype(property)>;
-            if constexpr (std::is_same_v<Value, double>) {
-                return std::isfinite(property);
-            } else if constexpr (std::is_same_v<Value, Vec2>) {
-                return std::isfinite(property.x) && std::isfinite(property.y);
-            } else if constexpr (std::is_same_v<Value, OpaqueJsonProperty>) {
-                return Detail::ValidOpaqueJsonProperty(property.canonical_json);
-            } else {
-                return true;
-            }
-        },
-        value);
+    return ValidatePropertyValue(value).has_value();
 }
 
 [[nodiscard]] bool ValidProperties(const PropertyBag& properties) noexcept {
-    return std::ranges::all_of(
-        properties, [](const auto& entry) { return !entry.first.empty() && ValidPropertyValue(entry.second); });
+    return ValidatePropertyBag(properties).has_value();
 }
 
 } // namespace

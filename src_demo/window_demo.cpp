@@ -257,7 +257,7 @@ namespace Uni::GUI::Example {
         const auto draw_float_value = [](NodeUiContext& context) {
             double value = 0.0;
             if (const auto* property = context.FindProperty("value")) {
-                if (const auto* current = std::get_if<double>(property)) value = *current;
+                if (const auto* current = property->GetIf<double>()) value = *current;
             }
             const bool changed = ImGui::InputDouble("##float-value", &value, 0.1, 1.0, "%.3f");
             context.EditProperty("value", PropertyValue{value}, changed);
@@ -265,7 +265,7 @@ namespace Uni::GUI::Example {
         const auto draw_int_value = [](NodeUiContext& context) {
             std::int64_t value = 0;
             if (const auto* property = context.FindProperty("value")) {
-                if (const auto* current = std::get_if<std::int64_t>(property)) value = *current;
+                if (const auto* current = property->GetIf<std::int64_t>()) value = *current;
             }
             const bool changed = ImGui::InputScalar("##int-value", ImGuiDataType_S64, &value);
             context.EditProperty("value", PropertyValue{value}, changed);
@@ -831,7 +831,7 @@ namespace Uni::GUI::Example {
                 double value = 0.0;
                 if (node != nullptr) {
                     if (const auto found = node->properties.find("value"); found != node->properties.end()) {
-                        if (const auto* current = std::get_if<double>(&found->second)) value = *current;
+                        if (const auto* current = found->second.GetIf<double>()) value = *current;
                     }
                 }
                 (void)ExecuteNodeDemoCommand(
@@ -956,7 +956,7 @@ namespace Uni::GUI::Example {
                             .display_name = "Unknown type: preserved on load",
                             .properties = {{
                                 "future_payload",
-                                PropertyValue{OpaqueJsonProperty{
+                                PropertyValue{OpaqueProperty{
                                     "{\"kind\":\"demo_future\",\"value\":{\"label\":\"preserved\"}}"}},
                             }},
                         }},

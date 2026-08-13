@@ -98,7 +98,7 @@ float NodeUiContext::ToScreen(const float logical_size) const noexcept { return 
 Vec2 NodeUiContext::ToScreen(const Vec2 logical_size) const noexcept { return logical_size * ScreenScale(); }
 
 const PropertyValue* NodeUiContext::FindProperty(const std::string_view key) const {
-    const auto found = m_node->properties.find(std::string(key));
+    const auto found = m_node->properties.find(key);
     return found != m_node->properties.end() ? &found->second : nullptr;
 }
 

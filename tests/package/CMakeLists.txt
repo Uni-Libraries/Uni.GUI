@@ -4,11 +4,11 @@ project(UniGUIPackageConsumer LANGUAGES CXX)
 
 include(CTest)
 
-find_package(UniGUI 3.0 CONFIG REQUIRED)
-find_package(UniGUI 3.0.0 EXACT CONFIG REQUIRED)
+find_package(UniGUI 4.0 CONFIG REQUIRED)
+find_package(UniGUI 4.0.0 EXACT CONFIG REQUIRED)
 
-if(NOT UniGUI_VERSION STREQUAL "3.0.0" OR
-   NOT UniGUI_ABI_VERSION STREQUAL "2")
+if(NOT UniGUI_VERSION STREQUAL "4.0.0" OR
+   NOT UniGUI_ABI_VERSION STREQUAL "4")
     message(FATAL_ERROR
         "Unexpected installed package metadata: version=${UniGUI_VERSION}, "
         "ABI=${UniGUI_ABI_VERSION}")

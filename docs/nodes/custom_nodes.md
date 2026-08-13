@@ -50,6 +50,29 @@ Result<void> RegisterGain(RegistryCatalog& registry) {
 
 The registry rejects empty types and names, version zero, duplicate type IDs, duplicate or empty pin keys, invalid pin metadata, non-finite property defaults, and invalid impact declarations. An empty pin label is normalized to its semantic key.
 
+Structured configuration uses the same recursive `PropertyValue` API as scalar configuration:
+
+```cpp
+descriptor.default_properties = {{
+    "configuration",
+    PropertyValue::Object{
+        {"enabled", true},
+        {"inputs", PropertyValue::Array{
+            PropertyValue::Object{
+                {"name", "main"},
+                {"source", PropertyReference{
+                    .type = "texture",
+                    .value = "textures/albedo",
+                }},
+            },
+        }},
+    },
+}};
+
+```
+
+Application-defined reference namespaces and string identities avoid assumptions about asset databases, URI schemes, or numeric ID allocation. Use `OpaqueProperty` only to preserve unknown typed extension envelopes; known configuration should use the built-in recursive kinds.
+
 `NodePinSchema` is the single source of descriptor-owned pin metadata. A braced list creates a fixed schema. `Instantiate()` copies defaults, applies `NodeInstantiationOptions::property_overrides`, resolves the schema, allocates node and pin IDs, marks descriptor-owned pins `PinStorage::Static`, and sets `type_version` to the descriptor version. `PinStorage::Static` describes ownership, not lifetime: a configurable descriptor may reconcile those pins when a declared dependency changes. Instance-owned dynamic pins retain `PinStorage::Dynamic` and must have unique semantic keys.
 
 ### Configurable Pin Schemas
@@ -145,7 +168,7 @@ Result<void> RegisterGainUi(NodeUiRegistry& ui) {
         .draw_body = [](NodeUiContext& context) {
             double value = 0.0;
             if (const PropertyValue* property = context.FindProperty("gain_db")) {
-                if (const auto* stored = std::get_if<double>(property)) value = *stored;
+                if (const auto* stored = property->GetIf<double>()) value = *stored;
             }
 
             float edited = static_cast<float>(value);

@@ -4,9 +4,9 @@ Nodes provides deterministic JSON for complete documents, clipboard-style fragme
 
 ## Wire Format And Schema
 
-`GraphJsonFormatVersion` is currently `4`. It versions the library-owned JSON envelope and field layout. Readers require the exact supported format version and exact object key sets; missing, duplicate, or unsupported structural fields return `InvalidFormat`, and a newer envelope returns `UnsupportedVersion`.
+`GraphJsonFormatVersion` is currently `5`. It versions the library-owned JSON envelope and field layout. Readers require the exact supported format version and exact object key sets; missing, duplicate, or unsupported structural fields return `InvalidFormat`, and a different envelope version returns `UnsupportedVersion`.
 
-Version 4 remains flat: link presentation emits `router`, `route_points`, `color`, and `locked`, while groups emit `position`, `size`, `collapsed`, `z_order`, `title`, `body`, `color`, `kind`, `members`, and `locked`. Decode constructs `LinkStyle`/`PersistentRoutePointSequence` and `GroupGeometry`/`GroupStyleHandle`/`GroupMemberSet`/`GroupProtection` internally. Do not write nested C++ model names into JSON.
+Version 5 uses one recursive typed property envelope at every level. Built-in `kind` values are `null`, `bool`, `int64`, `float64`, `string`, `vec2`, `reference`, `array`, and `object`. A reference value contains `{ "type", "value" }`; arrays contain typed property envelopes; objects map UTF-8 keys to typed property envelopes. Unknown kinds are retained as `OpaqueProperty` at any nesting level. There is no `structured` wrapper and no numeric project-owned asset ID kind.
 
 `GraphDocument::SchemaVersion()` is an application data-schema version stored inside that envelope. It starts at 1 and is advanced through `DocumentMigrationRegistry`. Do not use schema version to describe the Nodes wire layout.
 
@@ -15,7 +15,7 @@ Serialization is canonical and deterministic:
 - Maps and IDs are emitted in stable order.
 - Output is UTF-8 and newline-terminated.
 - 64-bit IDs and integer-like values are encoded without JSON floating-point precision loss.
-- Unknown property JSON is retained canonically through `OpaqueJsonProperty`.
+- Unknown property JSON is retained canonically through `OpaqueProperty`.
 - Unknown node types and router IDs retain their persisted strings.
 
 The strict structural policy means arbitrary future graph/node/link fields are not retained. Forward-compatible plugin payloads belong in typed properties with an opaque property kind, not in new unrecognized envelope fields.
@@ -133,7 +133,7 @@ An unregistered node type loads unchanged with a warning. A node version newer t
 
 Limits are security and resource controls, not only performance hints. Byte limits are checked before parsing a file, depth/value/string limits are enforced while parsing, entity limits are counted while decoding, and the final migrated result is serialized/validated against the same limits. Exceeding one returns `SizeLimitExceeded`.
 
-Use lower application-specific limits when opening untrusted content. Raising `max_depth` also permits deeper `OpaqueJsonProperty` values.
+Use lower application-specific limits when opening untrusted content. `GraphIoLimits::PropertyValueLimits()` derives the semantic property-tree limits used after decode and after migrations, so deep or wide programmatically produced values are constrained as well as parsed JSON.
 
 ## Atomic Files
 

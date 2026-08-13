@@ -107,11 +107,20 @@ Fixture::Fixture(RegistryCatalog& registry) : types(registry) {
     auto sink = registry.Instantiate(fixture.document, TypeId{"io.sink"});
     Expect(source && sink, "Fixture nodes must instantiate");
     source->node.properties = {
-        {"asset", AssetReference{std::numeric_limits<std::uint64_t>::max()}},
+        {"asset", PropertyReference{.type = "asset", .value = std::to_string(std::numeric_limits<std::uint64_t>::max())}},
         {"bool", true},
         {"double", 0.125},
         {"int", std::numeric_limits<std::int64_t>::min()},
-        {"opaque", OpaqueJsonProperty{
+        {"nested", PropertyValue::Object{
+            {"array", PropertyValue::Array{
+                PropertyNull{},
+                Vec2{1.0f, 2.0f},
+                PropertyReference{.type = "texture", .value = "albedo"},
+                OpaqueProperty{"{\"kind\":\"future.scalar\",\"value\":17}"},
+            }},
+            {"empty", PropertyValue::Object{}},
+        }},
+        {"opaque", OpaqueProperty{
             "{\"kind\":\"future.vector\",\"value\":{"
             "\"decimal\":0.12345678901234567890123456789,\"huge\":1e400,"
             "\"precise\":9007199254740993,\"tiny\":1e-400,\"w\":4,\"x\":1}}"}},
@@ -190,9 +199,13 @@ void TestDocumentRoundTripAndUnknownData() {
     auto second = SerializeGraphDocumentJson(fixture.document, fixture.presentation);
     Expect(first && second && *first == *second && first->back() == '\n',
            "Document JSON must be deterministic and newline-terminated");
-    Expect(first->find("\"asset\":{\"kind\":\"asset\",\"value\":"
-                       "\"18446744073709551615\"}") != std::string::npos,
-           "64-bit values must be encoded without JSON precision loss");
+    Expect(first->find("\"asset\":{\"kind\":\"reference\",\"value\":{\"type\":\"asset\",\"value\":"
+                        "\"18446744073709551615\"}}") != std::string::npos,
+            "Typed references must retain project-independent string identities");
+    Expect(first->find("\"nested\":{\"kind\":\"object\"") != std::string::npos &&
+               first->find("\"array\":{\"kind\":\"array\"") != std::string::npos &&
+               first->find("\"kind\":\"null\"") != std::string::npos,
+           "Recursive properties must use the same typed wire representation at every depth");
     Expect(first->find("future.vector") != std::string::npos, "Opaque property JSON must be retained");
     Expect(first->find("\"router\":\"test.router\"") != std::string::npos,
            "Opaque link router IDs must be encoded as stable strings");
@@ -438,8 +451,8 @@ void TestMalformedLimitsAndFiles() {
     Expect(decoded_unicode && decoded_unicode->document.FindNode(fixture.graph, fixture.source)->display_name == "\xF0\x9F\x98\x80",
            "The JSON parser must decode valid surrogate pairs to UTF-8");
     std::string future_format = *json;
-    const std::string format = "\"format_version\":4";
-    future_format.replace(future_format.find(format), format.size(), "\"format_version\":5");
+    const std::string format = "\"format_version\":5";
+    future_format.replace(future_format.find(format), format.size(), "\"format_version\":6");
     auto unsupported = DeserializeGraphDocumentJson(future_format, registry);
     Expect(!unsupported && unsupported.error().code == ErrorCode::UnsupportedVersion,
            "Unsupported envelope versions must fail rather than discard data");
@@ -512,7 +525,7 @@ void TestMalformedLimitsAndFiles() {
     deep_opaque.append(140, ']');
     deep_opaque += '}';
     Execute(fixture.commands,
-            std::make_unique<SetNodePropertyCommand>(fixture.graph, fixture.source, "deep", OpaqueJsonProperty{deep_opaque}),
+            std::make_unique<SetNodePropertyCommand>(fixture.graph, fixture.source, "deep", OpaqueProperty{deep_opaque}),
             fixture.document, fixture.presentation, fixture.types,
             "Opaque property depth must be validated independently of default IO limits");
     auto default_depth = SerializeGraphDocumentJson(fixture.document, fixture.presentation);
@@ -748,7 +761,7 @@ void TestProtectionRoundTrip() {
             fixture.document, fixture.presentation, fixture.types, "Graph protection must be set");
 
     auto json = SerializeGraphDocumentJson(fixture.document, fixture.presentation);
-    Expect(json && json->find("\"format_version\":4") != std::string::npos &&
+    Expect(json && json->find("\"format_version\":5") != std::string::npos &&
                json->find("\"read_only\":true") != std::string::npos &&
                json->find("\"locked\":true") != std::string::npos,
             "Protection state must be encoded by the current wire format");
@@ -806,8 +819,8 @@ void TestGraphAssetsAndStageFourPersistence() {
 
     auto serialized = SerializeGraphAssetJson(asset);
     Expect(serialized && serialized->find("\"kind\":\"graph_asset\"") != std::string::npos &&
-               serialized->find("\"format_version\":4") != std::string::npos,
-            "Graph assets must use their own deterministic version-four envelope");
+               serialized->find("\"format_version\":5") != std::string::npos,
+            "Graph assets must use their own deterministic version-five envelope");
     auto loaded = DeserializeGraphAssetJson(*serialized, registry);
     Expect(loaded && loaded->asset.id == asset.id &&
                *SerializeGraphAssetJson(loaded->asset) == *serialized,

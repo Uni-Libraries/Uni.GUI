@@ -408,8 +408,8 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
 }
 
 [[nodiscard]] bool KnownPropertyKind(const std::string_view kind) noexcept {
-    return kind == "bool" || kind == "int64" || kind == "float64" || kind == "string" || kind == "vec2" ||
-           kind == "asset";
+    return kind == "null" || kind == "bool" || kind == "int64" || kind == "float64" || kind == "string" ||
+           kind == "vec2" || kind == "reference" || kind == "array" || kind == "object";
 }
 
 [[nodiscard]] GraphIoLimits OpaqueLimits(const std::string_view json) noexcept {
@@ -430,7 +430,10 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
         [](const auto& value) -> Json {
             using Value = std::remove_cvref_t<decltype(value)>;
             Json::Object object;
-            if constexpr (std::same_as<Value, bool>) {
+            if constexpr (std::same_as<Value, PropertyNull>) {
+                object.emplace("kind", String("null"));
+                object.emplace("value", Null());
+            } else if constexpr (std::same_as<Value, bool>) {
                 object.emplace("kind", String("bool"));
                 object.emplace("value", Bool(value));
             } else if constexpr (std::same_as<Value, std::int64_t>) {
@@ -445,9 +448,26 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
             } else if constexpr (std::same_as<Value, Vec2>) {
                 object.emplace("kind", String("vec2"));
                 object.emplace("value", EncodeVec2(value));
-            } else if constexpr (std::same_as<Value, AssetReference>) {
-                object.emplace("kind", String("asset"));
-                object.emplace("value", String(std::to_string(value.id)));
+            } else if constexpr (std::same_as<Value, PropertyReference>) {
+                Json::Object reference;
+                reference.emplace("type", String(value.type));
+                reference.emplace("value", String(value.value));
+                object.emplace("kind", String("reference"));
+                object.emplace("value", Object(std::move(reference)));
+            } else if constexpr (std::same_as<Value, PropertyValue::Array>) {
+                Json::Array array;
+                array.reserve(value.size());
+                for (const auto& child : value) array.push_back(EncodeProperty(child));
+                object.emplace("kind", String("array"));
+                object.emplace("value", Array(std::move(array)));
+            } else if constexpr (std::same_as<Value, PropertyValue::Object>) {
+                Json::Object children;
+                for (const auto& [key, child] : value) {
+                    if (!ValidUtf8(key)) Fail(ErrorCode::InvalidArgument, "Property object key is not valid UTF-8");
+                    children.emplace(key, EncodeProperty(child));
+                }
+                object.emplace("kind", String("object"));
+                object.emplace("value", Object(std::move(children)));
             } else {
                 Json parsed = ParseJson(value.canonical_json, OpaqueLimits(value.canonical_json));
                 const auto& opaque = AsObject(parsed, "opaque property");
@@ -459,7 +479,7 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
             }
             return Object(std::move(object));
         },
-        property);
+        property.value);
 }
 
 [[nodiscard]] PropertyValue DecodeProperty(const Json& value) {
@@ -468,10 +488,15 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
     if (!KnownPropertyKind(kind)) {
         std::string canonical = DumpJson(value);
         canonical.pop_back();
-        return OpaqueJsonProperty{std::move(canonical)};
+        return OpaqueProperty{std::move(canonical)};
     }
     ExpectKeys(object, {"kind", "value"}, "property");
     const Json& encoded = Field(object, "value", "property");
+    if (kind == "null") {
+        if (!std::holds_alternative<std::nullptr_t>(encoded.value))
+            Fail(ErrorCode::InvalidFormat, "property.value must be null");
+        return PropertyNull{};
+    }
     if (kind == "bool")
         return AsBool(encoded, "property.value");
     if (kind == "int64") {
@@ -483,7 +508,22 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
         return AsString(encoded, "property.value");
     if (kind == "vec2")
         return DecodeVec2(encoded, "property.value");
-    return AssetReference{AsU64String(encoded, "property.value", false)};
+    if (kind == "reference") {
+        const auto& reference = AsObject(encoded, "property reference");
+        ExpectKeys(reference, {"type", "value"}, "property reference");
+        return PropertyReference{
+            .type = AsString(Field(reference, "type", "property reference"), "property reference.type"),
+            .value = AsString(Field(reference, "value", "property reference"), "property reference.value"),
+        };
+    }
+    if (kind == "array") {
+        PropertyValue::Array result;
+        for (const auto& child : AsArray(encoded, "property array")) result.push_back(DecodeProperty(child));
+        return result;
+    }
+    PropertyValue::Object result;
+    for (const auto& [key, child] : AsObject(encoded, "property object")) result.emplace(key, DecodeProperty(child));
+    return result;
 }
 
 [[nodiscard]] Json EncodeProperties(const PropertyBag& properties) {
@@ -501,9 +541,16 @@ void Bump(std::size_t& value, const std::size_t limit, const std::string_view na
     for (const auto& [key, property] : AsObject(value, "node.properties")) {
         if (key.empty())
             Fail(ErrorCode::InvalidFormat, "Property key cannot be empty");
-        Bump(counts.properties, counts.limits.max_properties, "Property count");
         properties.emplace(key, DecodeProperty(property));
     }
+    const auto property_limits = counts.limits.PropertyValueLimits();
+    if (auto valid = ValidatePropertyBag(properties, property_limits); !valid) {
+        Fail(valid.error().code == ErrorCode::InvalidArgument ? ErrorCode::InvalidFormat : valid.error().code,
+             valid.error().message);
+    }
+    if (properties.size() > counts.limits.max_properties - std::min(counts.properties, counts.limits.max_properties))
+        Fail(ErrorCode::SizeLimitExceeded, "Property count exceeds its configured limit");
+    counts.properties += properties.size();
     return properties;
 }
 
@@ -1186,19 +1233,7 @@ struct DecodedGraphAsset final {
 [[nodiscard]] bool Finite(const Vec2 value) noexcept { return std::isfinite(value.x) && std::isfinite(value.y); }
 
 [[nodiscard]] bool ValidProperty(const PropertyValue& property) noexcept {
-    return std::visit(
-        [](const auto& value) noexcept {
-            using Value = std::remove_cvref_t<decltype(value)>;
-            if constexpr (std::same_as<Value, double>)
-                return std::isfinite(value);
-            if constexpr (std::same_as<Value, Vec2>)
-                return Finite(value);
-            if constexpr (std::same_as<Value, OpaqueJsonProperty>) {
-                return Detail::ValidOpaqueJsonProperty(value.canonical_json);
-            }
-            return true;
-        },
-        property);
+    return ValidatePropertyValue(property).has_value();
 }
 
 void ValidateNodeDescriptor(const NodeCreation& creation, const RegistrySnapshot& registry, const NodeTypeDescriptor& descriptor) {

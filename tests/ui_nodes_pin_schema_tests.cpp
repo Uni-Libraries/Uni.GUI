@@ -75,7 +75,7 @@ class TransactionPropertyCommand final : public Command {
     const auto found = properties.find("mode");
     if (found == properties.end())
         return "source_sink";
-    const auto* mode = std::get_if<std::string>(&found->second);
+    const auto* mode = found->second.GetIf<std::string>();
     return mode != nullptr ? *mode : "invalid";
 }
 
@@ -254,7 +254,7 @@ void TestTopologyProjectionLocalLinksAndHistory() {
     Expect(commands.Undo(document, presentation, registry).has_value(), "Topology projection undo must succeed");
     const auto* restored_sink = FindPin(document, graph, configurable_id, "sink");
     Expect(restored_sink != nullptr && restored_sink->id == original_sink && FindPin(document, graph, configurable_id, "source")->id == original_source &&
-               std::get<std::string>(document.FindNode(graph, configurable_id)->properties.at("mode")) == "source_sink" &&
+               document.FindNode(graph, configurable_id)->properties.at("mode").Get<std::string>() == "source_sink" &&
                *FindPin(document, graph, configurable_id, "instance") == dynamic_pin &&
                document.FindNode(graph, configurable_id)->pins ==
                    std::vector<PinId>{original_source, dynamic_pin.id, original_sink} &&
@@ -264,7 +264,7 @@ void TestTopologyProjectionLocalLinksAndHistory() {
 
     Expect(commands.Redo(document, presentation, registry).has_value() && FindPin(document, graph, configurable_id, "sink") == nullptr &&
                document.FindLink(graph, link) == nullptr &&
-               std::get<std::string>(document.FindNode(graph, configurable_id)->properties.at("mode")) == "source" &&
+               document.FindNode(graph, configurable_id)->properties.at("mode").Get<std::string>() == "source" &&
                *FindPin(document, graph, configurable_id, "instance") == dynamic_pin,
            "Topology projection redo must remove the same topology again");
     Execute(commands, std::make_unique<SetNodePropertyCommand>(graph, configurable_id, "mode", std::string{"source_sink"}), document, presentation, registry,
@@ -428,7 +428,7 @@ void TestSchemaRevisionDomains() {
         .display_name = "Projected intergraph output",
         .pin_schema = NodePinSchema{{"enabled"}, [](const PropertyBag& properties) -> Result<std::vector<PinDescriptor>> {
                 const auto found = properties.find("enabled");
-                const bool enabled = found != properties.end() && std::get<bool>(found->second);
+                const bool enabled = found != properties.end() && found->second.Get<bool>();
                 if (!enabled)
                     return std::vector<PinDescriptor>{};
                 return std::vector<PinDescriptor>{PinDescriptor{

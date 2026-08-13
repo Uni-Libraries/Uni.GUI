@@ -14,7 +14,7 @@
 
 namespace Uni::GUI::Nodes {
 
-inline constexpr std::uint32_t GraphJsonFormatVersion = 4;
+inline constexpr std::uint32_t GraphJsonFormatVersion = 5;
 
 struct GraphArchive final {
     std::uint32_t schema_version{1};
@@ -64,6 +64,17 @@ struct GraphIoLimits final {
     std::size_t max_groups{100'000};
     std::size_t max_route_points{400'000};
     std::size_t max_properties{400'000};
+
+    [[nodiscard]] PropertyLimits PropertyValueLimits() const noexcept {
+        return PropertyLimits{
+            .max_depth = max_depth,
+            .max_values = max_properties,
+            .max_array_elements = max_properties,
+            .max_object_members = max_properties,
+            .max_string_bytes = max_string_bytes,
+            .max_total_string_bytes = max_bytes,
+        };
+    }
 };
 
 struct GraphIoWarning final {

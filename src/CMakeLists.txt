@@ -55,6 +55,7 @@ target_sources(unigui
         ui_nodes_layout.cpp
         ui_nodes_node_ui.cpp
         ui_nodes_presentation.cpp
+        ui_nodes_property.cpp
         ui_nodes_policy.cpp
         ui_nodes_registry.cpp
         ui_nodes_routing.cpp
@@ -90,6 +91,7 @@ target_sources(unigui
             "${unigui_public_include_dir}/uni/gui/nodes/nodes.h"
             "${unigui_public_include_dir}/uni/gui/nodes/presentation.h"
             "${unigui_public_include_dir}/uni/gui/nodes/policy.h"
+            "${unigui_public_include_dir}/uni/gui/nodes/property.h"
             "${unigui_public_include_dir}/uni/gui/nodes/registry.h"
             "${unigui_public_include_dir}/uni/gui/nodes/routing.h"
             "${unigui_public_include_dir}/uni/gui/nodes/selection.h"

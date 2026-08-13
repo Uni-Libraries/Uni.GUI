@@ -522,7 +522,7 @@ void TestCoreCommandsAndRevisions() {
         commands, std::make_unique<SetNodePropertyCommand>(graph, source_id, "value", PropertyValue{std::string{"42"}}),
         document, presentation, types, "Property command must execute");
     Expect(property.model_changed && !property.presentation_changed, "Property command must be model-only");
-    Expect(std::get<std::string>(document.FindNode(graph, source_id)->properties.at("value")) == "42",
+    Expect(document.FindNode(graph, source_id)->properties.at("value").Get<std::string>() == "42",
            "Property command must update the node");
     Expect(commands.Undo(document, presentation, types).has_value(), "Property undo must execute");
     Expect(!document.FindNode(graph, source_id)->properties.contains("value"), "Property undo must restore absence");
@@ -2227,7 +2227,7 @@ void TestCompoundAtomicityAndRevisionConflict() {
                !document.FindNode(graph, node)->properties.contains("continuous") && !first.CanUndo(),
            "Continuous property edits must coalesce into one undo entry");
     Expect(first.Redo(document, presentation, types).has_value() &&
-               std::get<double>(document.FindNode(graph, node)->properties.at("continuous")) == 2.0,
+               document.FindNode(graph, node)->properties.at("continuous").Get<double>() == 2.0,
            "Coalesced property edit redo must apply the final gesture value");
     Expect(first.Undo(document, presentation, types).has_value(),
            "Coalesced property edit must remain undoable after redo");
@@ -2844,13 +2844,13 @@ void TestNodeUiExtensibility() {
                            {"scale", PropertyValue{1.5}},
                            {"title", PropertyValue{std::string{"typed"}}},
                            {"offset", PropertyValue{Vec2{2.0f, 3.0f}}},
-                           {"asset", PropertyValue{AssetReference{42}}},
+                            {"asset", PropertyValue{PropertyReference{.type = "asset", .value = "42"}}},
                        },
                    .behavior = std::make_shared<const NodeBehavior>(NodeBehavior{
                        .validate =
                            [](const NodeInstance& node, std::span<const PinInstance>) {
                                const auto enabled = node.properties.find("enabled");
-                               if (enabled == node.properties.end() || !std::holds_alternative<bool>(enabled->second)) {
+                                if (enabled == node.properties.end() || !enabled->second.Is<bool>()) {
                                    return std::vector<std::string>{"Property 'enabled' must be boolean"};
                                }
                                return std::vector<std::string>{};
@@ -2956,12 +2956,13 @@ void TestNodeUiExtensibility() {
     const NodeId node = creation->node.id;
     header_item_node = node;
     const PinId output = creation->pins.front().id;
-    Expect(std::get<bool>(creation->node.properties.at("enabled")) == false &&
-               std::get<std::int64_t>(creation->node.properties.at("count")) == 7 &&
-               std::get<double>(creation->node.properties.at("scale")) == 1.5 &&
-               std::get<std::string>(creation->node.properties.at("title")) == "typed" &&
-               std::get<Vec2>(creation->node.properties.at("offset")) == Vec2{2.0f, 3.0f} &&
-               std::get<AssetReference>(creation->node.properties.at("asset")).id == 42,
+    Expect(creation->node.properties.at("enabled").Get<bool>() == false &&
+               creation->node.properties.at("count").Get<std::int64_t>() == 7 &&
+               creation->node.properties.at("scale").Get<double>() == 1.5 &&
+               creation->node.properties.at("title").Get<std::string>() == "typed" &&
+               creation->node.properties.at("offset").Get<Vec2>() == Vec2{2.0f, 3.0f} &&
+               creation->node.properties.at("asset").Get<PropertyReference>() ==
+                   PropertyReference{.type = "asset", .value = "42"},
            "Node instantiation must preserve every typed property alternative");
     Execute(commands,
             std::make_unique<AddNodeCommand>(graph, std::move(*creation),
@@ -3022,7 +3023,7 @@ void TestNodeUiExtensibility() {
     const auto initial_frame = draw_editor_frame();
     Expect(body_calls == 2 && pin_style_calls > 0 && header_state_calls == 2 && header_glyph_calls == 1,
            "Editor must invoke custom body, header presentation, glyph, and pin style callbacks");
-    Expect(!initial_frame.model_changed && !std::get<bool>(document.FindNode(graph, node)->properties.at("enabled")),
+    Expect(!initial_frame.model_changed && !document.FindNode(graph, node)->properties.at("enabled").Get<bool>(),
            "Rendering a custom widget must remain read-only until interaction");
     const ImVec2 body_button_center = (body_button_min + body_button_max) * 0.5f;
     io.AddMousePosEvent(body_button_center.x, body_button_center.y);
@@ -3031,8 +3032,8 @@ void TestNodeUiExtensibility() {
     io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
     const auto clicked_frame = draw_editor_frame();
     Expect(body_calls == 6 && clicked_frame.model_changed &&
-               std::get<bool>(document.FindNode(graph, node)->properties.at("enabled")) &&
-               !std::get<bool>(document.FindNode(graph, lower_node)->properties.at("enabled")),
+               document.FindNode(graph, node)->properties.at("enabled").Get<bool>() &&
+               !document.FindNode(graph, lower_node)->properties.at("enabled").Get<bool>(),
            "Only the topmost embedded ImGui widget must receive an overlapping "
            "mouse click");
 
@@ -3075,7 +3076,7 @@ void TestNodeUiExtensibility() {
     ImGui::Render();
     Expect(inspector_calls == 1 && inspector_result.model_changed, "Inspector callback must execute queued edits");
     const auto* edited_node = document.FindNode(graph, node);
-    Expect(std::get<double>(edited_node->properties.at("gain")) == 2.5, "Inspector must persist typed properties");
+    Expect(edited_node->properties.at("gain").Get<double>() == 2.5, "Inspector must persist typed properties");
     const auto dynamic = std::ranges::find_if(edited_node->pins, [&](const PinId pin) {
         return document.FindPin(graph, pin)->storage == PinStorage::Dynamic;
     });

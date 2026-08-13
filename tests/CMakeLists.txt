@@ -57,6 +57,12 @@ target_link_libraries(unigui_nodes_pin_schema_tests PRIVATE UniGUI::UniGUI)
 set_target_properties(unigui_nodes_pin_schema_tests PROPERTIES CXX_EXTENSIONS OFF)
 add_test(NAME unigui.nodes-pin-schema COMMAND unigui_nodes_pin_schema_tests)
 
+add_executable(unigui_nodes_property_tests ui_nodes_property_tests.cpp)
+target_compile_features(unigui_nodes_property_tests PRIVATE cxx_std_23)
+target_link_libraries(unigui_nodes_property_tests PRIVATE UniGUI::UniGUI)
+set_target_properties(unigui_nodes_property_tests PROPERTIES CXX_EXTENSIONS OFF)
+add_test(NAME unigui.nodes-property COMMAND unigui_nodes_property_tests)
+
 add_executable(unigui_nodes_type_compatibility_tests
     ui_nodes_type_compatibility_tests.cpp
 )
@@ -161,22 +167,22 @@ if(UNIGUI_INSTALL)
 
     set(unigui_current_version_file "${PROJECT_BINARY_DIR}/UniGUIConfigVersion.cmake")
     unigui_add_package_version_test(
-        unigui.package-version.minimum-3.0
-        "${unigui_current_version_file}" 3.0 "${UNIGUI_VERSION}" ON OFF)
+        unigui.package-version.minimum-4.0
+        "${unigui_current_version_file}" 4.0 "${UNIGUI_VERSION}" ON OFF)
     unigui_add_package_version_test(
-        unigui.package-version.exact-3.0.0
-        "${unigui_current_version_file}" 3.0.0 "${UNIGUI_VERSION}" ON ON)
+        unigui.package-version.exact-4.0.0
+        "${unigui_current_version_file}" 4.0.0 "${UNIGUI_VERSION}" ON ON)
     unigui_add_package_version_test(
-        unigui.package-version.reject-newer-3.0.1
-        "${unigui_current_version_file}" 3.0.1 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-newer-4.0.1
+        "${unigui_current_version_file}" 4.0.1 "${UNIGUI_VERSION}" OFF OFF)
     unigui_add_package_version_test(
-        unigui.package-version.reject-major-2
-        "${unigui_current_version_file}" 2.0.0 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-major-3
+        "${unigui_current_version_file}" 3.0.0 "${UNIGUI_VERSION}" OFF OFF)
     unigui_add_package_version_test(
-        unigui.package-version.reject-major-4
-        "${unigui_current_version_file}" 4.0.0 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-major-5
+        "${unigui_current_version_file}" 5.0.0 "${UNIGUI_VERSION}" OFF OFF)
 
-    foreach(synthetic_version IN ITEMS 3.0.1 3.1.0 4.0.0)
+    foreach(synthetic_version IN ITEMS 4.0.1 4.1.0 5.0.0)
         set(synthetic_version_file
             "${CMAKE_CURRENT_BINARY_DIR}/UniGUIConfigVersion-${synthetic_version}.cmake")
         write_basic_package_version_file(
@@ -184,14 +190,14 @@ if(UNIGUI_INSTALL)
             VERSION "${synthetic_version}"
             COMPATIBILITY SameMajorVersion
         )
-        if(synthetic_version MATCHES "^3\\.")
+        if(synthetic_version MATCHES "^4\\.")
             set(expect_compatible ON)
         else()
             set(expect_compatible OFF)
         endif()
         unigui_add_package_version_test(
             "unigui.package-version.synthetic-${synthetic_version}"
-            "${synthetic_version_file}" 3.0.0 "${synthetic_version}"
+            "${synthetic_version_file}" 4.0.0 "${synthetic_version}"
             "${expect_compatible}" OFF)
     endforeach()
 endif()

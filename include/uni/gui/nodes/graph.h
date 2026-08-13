@@ -3,6 +3,7 @@
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/error.h>
 #include <uni/gui/nodes/ids.h>
+#include <uni/gui/nodes/property.h>
 
 #include <algorithm>
 #include <array>
@@ -61,13 +62,6 @@ enum class CowCloneKind : std::uint8_t {
 UNI_GUI_EXPORT void RecordCowClone(CowCopyDomain domain, CowCloneKind kind, std::uint64_t copied_handles,
                                    std::uint64_t logical_bytes) noexcept;
 } // namespace Detail
-
-struct Vec2 final {
-    float x{0.0f};
-    float y{0.0f};
-
-    auto operator<=>(const Vec2&) const = default;
-};
 
 [[nodiscard]] constexpr Vec2 operator+(const Vec2 lhs, const Vec2 rhs) noexcept {
     return {lhs.x + rhs.x, lhs.y + rhs.y};
@@ -160,22 +154,6 @@ struct SubgraphReference final {
 
     bool operator==(const SubgraphReference&) const = default;
 };
-
-struct AssetReference final {
-    std::uint64_t id{0};
-
-    bool operator==(const AssetReference&) const = default;
-};
-
-struct OpaqueJsonProperty final {
-    // Canonical JSON object retained for property kinds unknown to this build.
-    std::string canonical_json;
-
-    bool operator==(const OpaqueJsonProperty&) const = default;
-};
-
-using PropertyValue = std::variant<bool, std::int64_t, double, std::string, Vec2, AssetReference, OpaqueJsonProperty>;
-using PropertyBag = std::unordered_map<std::string, PropertyValue>;
 
 struct PinInstance final {
     PinId id;
@@ -660,16 +638,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
             bytes += value.properties.size() * sizeof(PropertyBag::value_type);
             for (const auto& [key, property] : value.properties) {
                 bytes += key.capacity();
-                std::visit(
-                    [&](const auto& item) {
-                        using Item = std::remove_cvref_t<decltype(item)>;
-                        if constexpr (std::is_same_v<Item, std::string>) {
-                            bytes += item.capacity();
-                        } else if constexpr (std::is_same_v<Item, OpaqueJsonProperty>) {
-                            bytes += item.canonical_json.capacity();
-                        }
-                    },
-                    property);
+                bytes += EstimatePropertyBytes(property);
             }
         } else if constexpr (std::is_same_v<Value, PinInstance>) {
             bytes += value.key.capacity() + value.label.capacity();

@@ -153,7 +153,7 @@ struct NodesFixture final {
                 .type = TypeId{"ui-test.custom"},
                 .draw_body = [](NodeUiContext& context) {
                     const auto* value = context.FindProperty("enabled");
-                    const bool enabled = value != nullptr && std::get<bool>(*value);
+                    const bool enabled = value != nullptr && value->Get<bool>();
                     if (ImGui::Button(enabled ? "Custom node enabled" : "Enable custom node") && !enabled) {
                         context.SetProperty("enabled", PropertyValue{true});
                     }
@@ -544,11 +544,11 @@ void RegisterUniGuiNodesTestEngineCases(ImGuiTestEngine* engine) {
         context->ItemClick("//Nodes Test/**/Enable custom node");
         context->Yield(2);
         const NodeInstance* node = fixture->document.FindNode(fixture->graph, fixture->source);
-        IM_CHECK(node != nullptr && std::get<bool>(node->properties.at("enabled")));
+        IM_CHECK(node != nullptr && node->properties.at("enabled").Get<bool>());
         IM_CHECK(fixture->saw_model_change && fixture->commands.CanUndo());
         UndoWithKeyboard(context);
         node = fixture->document.FindNode(fixture->graph, fixture->source);
-        IM_CHECK(node != nullptr && !std::get<bool>(node->properties.at("enabled")));
+        IM_CHECK(node != nullptr && !node->properties.at("enabled").Get<bool>());
     };
 
     test = IM_REGISTER_TEST(engine, "unigui", "nodes_groups");

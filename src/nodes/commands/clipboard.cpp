@@ -10,23 +10,7 @@ using CommandDetail::OwnedClosure;
 using CommandDetail::ValidGraphInterface;
 
 [[nodiscard]] bool ValidProperties(const PropertyBag& properties) noexcept {
-    return std::ranges::all_of(properties, [](const auto& entry) {
-        if (entry.first.empty()) return false;
-        return std::visit(
-            [](const auto& value) {
-                using Value = std::remove_cvref_t<decltype(value)>;
-                if constexpr (std::same_as<Value, double>) {
-                    return std::isfinite(value);
-                } else if constexpr (std::same_as<Value, Vec2>) {
-                    return Finite(value);
-                } else if constexpr (std::same_as<Value, OpaqueJsonProperty>) {
-                    return Detail::ValidOpaqueJsonProperty(value.canonical_json);
-                } else {
-                    return true;
-                }
-            },
-            entry.second);
-    });
+    return ValidatePropertyBag(properties).has_value();
 }
 
 [[nodiscard]] bool ValidPinMetadata(const PinInstance& pin) noexcept {

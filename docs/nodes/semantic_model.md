@@ -51,17 +51,24 @@ A `NodeInstance` stores its `TypeId`, persisted descriptor version, display name
 
 ## Properties
 
-`PropertyValue` is exactly this closed variant:
+`PropertyValue` is one recursive typed value. Its `Storage` supports:
 
+- `PropertyNull`
 - `bool`
 - `std::int64_t`
 - `double`
 - `std::string`
 - `Vec2`
-- `AssetReference`
-- `OpaqueJsonProperty`
+- `PropertyReference`
+- `PropertyValue::Array`
+- `PropertyValue::Object`
+- `OpaqueProperty`
 
-Property keys must be non-empty. Doubles and vectors must be finite. `OpaqueJsonProperty` contains a canonical JSON object for an unknown plugin property kind; it is primarily produced by persistence so unknown data can round-trip. It is not a general extension map for arbitrary future document fields.
+Every alternative, including vectors, typed references, arrays, objects, and opaque extensions, is valid at every nesting level. `PropertyBag` is the same ordered object type used inside a value, so configuration has one data model instead of separate flat and structured representations. Root property keys must be non-empty; generic nested object keys may be empty. All strings and keys must be valid UTF-8, numbers and vectors must be finite, and references require non-empty application-defined `type` and `value` strings.
+
+Use `GetIf<T>()`, `Get<T>()`, and `Is<T>()` to inspect values.
+
+`PropertyLimits` bounds semantic depth, value count, container elements, and string bytes independently of JSON parsing. `ValidatePropertyValue()` and `ValidatePropertyBag()` are the common ingress contract used by graph mutation, registries, fragments, migrations, and persistence. `OpaqueProperty` contains one canonical typed JSON object for an unknown plugin kind and may occur at any depth; it is not a general extension map for arbitrary future graph fields.
 
 ## Presentation
 

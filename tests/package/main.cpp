@@ -120,13 +120,19 @@ int main() {
         .type = Nodes::TypeId{"package.node"},
         .display_name = "Package node",
         .default_properties = {
-            {"value", Nodes::PropertyValue{1.0}},
+            {"value", Nodes::PropertyValue::Object{
+                {"amount", 1.0},
+                {"source", Nodes::PropertyReference{.type = "package.asset", .value = "default"}},
+            }},
         },
     }).has_value();
     valid = valid && node_ui_registry.Register(Nodes::NodeUiDescriptor{
         .type = Nodes::TypeId{"package.node"},
         .draw_body = [](Nodes::NodeUiContext& context) {
-            context.SetProperty("value", Nodes::PropertyValue{2.0});
+            context.SetProperty("value", Nodes::PropertyValue::Object{
+                {"amount", 2.0},
+                {"source", Nodes::PropertyReference{.type = "package.asset", .value = "default"}},
+            });
         },
         .default_size = {200.0f, 100.0f},
     }).has_value();

@@ -11,6 +11,7 @@
 #include <uni/gui/nodes/node_ui.h>
 #include <uni/gui/nodes/presentation.h>
 #include <uni/gui/nodes/policy.h>
+#include <uni/gui/nodes/property.h>
 #include <uni/gui/nodes/registry.h>
 #include <uni/gui/nodes/routing.h>
 #include <uni/gui/nodes/selection.h>

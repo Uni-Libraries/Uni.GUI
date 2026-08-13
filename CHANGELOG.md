@@ -4,6 +4,12 @@ All notable changes to UniGUI are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-08-13
+
+- Replaces flat and project-specific node property representations with one recursive `PropertyValue` API for nulls, scalars, vectors, typed references, arrays, objects, and opaque extensions.
+- Adds centralized semantic property validation, resource limits, and recursive copy accounting.
+- Replaces the version 4 property wire representation with exact version 5 recursive typed envelopes.
+
 ## [3.0.0] - 2026-08-07
 
 - Replaces fixed descriptor pin arrays with one `NodePinSchema` API for fixed and property-configurable schemas.
@@ -22,7 +28,8 @@ All notable changes to UniGUI are documented in this file.
 
 - Initial release
 
-[Unreleased]: https://github.com/Uni-Libraries/Uni.GUI/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/Uni-Libraries/Uni.GUI/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/Uni-Libraries/Uni.GUI/releases/tag/v4.0.0
 [3.0.0]: https://github.com/Uni-Libraries/Uni.GUI/releases/tag/v3.0.0
 [2.0.0]: https://github.com/Uni-Libraries/Uni.GUI/releases/tag/v2.0.0
 [1.0.0]: https://github.com/Uni-Libraries/Uni.GUI/releases/tag/v1.0.0
