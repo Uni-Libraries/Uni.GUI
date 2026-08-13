@@ -327,7 +327,7 @@ struct SetNodePropertyCommand::Impl final {
 
     GraphId graph;
     NodeId node;
-    std::string key;
+    PropertyPath path;
     std::optional<PropertyValue> value;
     std::optional<PropertyValue> previous;
     std::optional<PropertyImpact> impact;
@@ -343,24 +343,24 @@ struct SetNodePropertyCommand::Impl final {
     bool captured{false};
 };
 
-SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value)
-    : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), Edit{}) {}
-SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+    : SetNodePropertyCommand(graph, node, std::move(path), std::move(value), Edit{}) {}
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value,
                                                const InvalidConnectionPolicy invalid_connections)
-    : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), Edit{}, invalid_connections) {}
-SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+    : SetNodePropertyCommand(graph, node, std::move(path), std::move(value), Edit{}, invalid_connections) {}
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value, const Edit edit)
-    : SetNodePropertyCommand(graph, node, std::move(key), std::move(value), edit,
-                             InvalidConnectionPolicy::Disconnect) {}
-SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, std::string key,
+    : SetNodePropertyCommand(graph, node, std::move(path), std::move(value), edit,
+                              InvalidConnectionPolicy::Disconnect) {}
+SetNodePropertyCommand::SetNodePropertyCommand(const GraphId graph, const NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value, const Edit edit,
                                                const InvalidConnectionPolicy invalid_connections)
     : m_impl(std::make_unique<Impl>(Impl{
           .graph = graph,
           .node = node,
-          .key = std::move(key),
+          .path = std::move(path),
           .value = std::move(value),
           .edit = edit,
           .invalid_connections = invalid_connections,
@@ -381,11 +381,9 @@ Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const 
         if (node == nullptr) {
             return std::unexpected(MakeError(ErrorCode::NodeNotFound, "Node does not exist"));
         }
-        if (const auto found = node->properties.find(m_impl->key); found != node->properties.end()) {
-            m_impl->previous = found->second;
-        }
-        m_impl->impact = transaction.ResolvePropertyImpact(node->type, m_impl->key);
-        m_impl->reproject_descriptor_pins = registry.PinSchemaDependsOn(node->type, m_impl->key);
+        if (const auto* found = Nodes::FindProperty(node->properties, m_impl->path)) m_impl->previous = *found;
+        m_impl->impact = transaction.ResolvePropertyImpact(node->type, m_impl->path);
+        m_impl->reproject_descriptor_pins = registry.PinSchemaDependsOn(node->type, m_impl->path);
         if (m_impl->reproject_descriptor_pins) {
             m_impl->descriptor = registry.Find(node->type);
             if (!m_impl->descriptor || node->type_version != m_impl->descriptor->version) {
@@ -393,13 +391,9 @@ Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const 
                     ErrorCode::RevisionConflict,
                     "Node pin schema requires the exact registered descriptor version"));
             }
-            PropertyBag properties = node->properties;
-            if (m_impl->value) {
-                properties.insert_or_assign(m_impl->key, *m_impl->value);
-            } else {
-                properties.erase(m_impl->key);
-            }
-            auto projected = registry.ResolvePinSchema(node->type, properties);
+            auto properties = Nodes::SetProperty(node->properties, m_impl->path, m_impl->value);
+            if (!properties) return std::unexpected(std::move(properties.error()));
+            auto projected = registry.ResolvePinSchema(node->type, *properties);
             if (!projected)
                 return std::unexpected(std::move(projected.error()));
 
@@ -513,7 +507,7 @@ Result<void> SetNodePropertyCommand::Apply(GraphTransaction& transaction, const 
         if (auto removed = transaction.RemoveLink(m_impl->graph, state.link.id); !removed)
             return std::unexpected(std::move(removed.error()));
     }
-    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->value, *m_impl->impact); !property) {
+    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->path, m_impl->value, *m_impl->impact); !property) {
         return property;
     }
     if (m_impl->reproject_descriptor_pins)
@@ -526,7 +520,7 @@ Result<void> SetNodePropertyCommand::Revert(GraphTransaction& transaction) {
             ErrorCode::RevisionConflict,
             "Node pin schema descriptor changed after the property command was prepared"));
     }
-    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->key, m_impl->previous, *m_impl->impact); !property) {
+    if (auto property = transaction.SetNodePropertyWithImpact(m_impl->graph, m_impl->node, m_impl->path, m_impl->previous, *m_impl->impact); !property) {
         return property;
     }
     if (m_impl->reproject_descriptor_pins) {
@@ -548,7 +542,7 @@ Result<void> SetNodePropertyCommand::Revert(GraphTransaction& transaction) {
 bool SetNodePropertyCommand::TryMerge(const Command& newer) {
     const auto* property = dynamic_cast<const SetNodePropertyCommand*>(&newer);
     if (property == nullptr || !m_impl->merge_open || m_impl->edit.merge_key == 0 || m_impl->edit.merge_key != property->m_impl->edit.merge_key ||
-        m_impl->graph != property->m_impl->graph || m_impl->node != property->m_impl->node || m_impl->key != property->m_impl->key ||
+        m_impl->graph != property->m_impl->graph || m_impl->node != property->m_impl->node || m_impl->path != property->m_impl->path ||
         m_impl->invalid_connections != property->m_impl->invalid_connections || m_impl->reproject_descriptor_pins ||
         property->m_impl->reproject_descriptor_pins) {
         return false;

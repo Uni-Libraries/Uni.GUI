@@ -128,7 +128,7 @@ Capture undo data from `transaction.Document()` or `transaction.Presentation()` 
 
 Custom commands do not declare authorization intents. Every successful transaction mutator emits its own structured policy record, so command names and custom metadata cannot hide a mutation. `GraphTransaction::SetNodeProperty()` resolves declared schema dependencies itself and rejects a transition that would require implicit link removal; a custom command that wants disconnection must capture and remove those links explicitly for undo. `Apply()` and `Revert()` must be free of external side effects because they run against staged state before policy authorization.
 
-`TryMerge()` defaults to `false`. `SetNodePropertyCommand::Edit` and `NodeUiContext::EditProperty()` use it to coalesce an active ImGui gesture.
+`TryMerge()` defaults to `false`. `SetNodePropertyCommand::Edit` and `NodeUiContext::EditProperty()` use it to coalesce an active ImGui gesture. Property commands address a `PropertyPath`; nested set or erase operations replace the root tree atomically, preserve sibling values, and retain exact leaf values for undo, redo, and policy inspection.
 
 ## Undo And Redo
 

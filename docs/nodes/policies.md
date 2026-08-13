@@ -16,7 +16,7 @@ policy.evaluate_operation = [](const OperationPolicyContext& context,
     const auto* property = intent.Get<PropertyOperation>();
     if (context.phase == OperationPhase::Execute &&
         intent.kind == OperationKind::SetNodeProperty &&
-        property && property->change->key == "runtime.gain" &&
+        property && property->change->path == PropertyPath{"runtime.gain"} &&
         ApplicationIsRunning()) {
         return DenyOperation{"Properties are frozen while the runtime is running"};
     }
@@ -44,7 +44,7 @@ With no callback, authorization recording is disabled: transactions do not alloc
 
 - `NodeOperation` and `PinOperation`, whose `value` fields are owning immutable handles to the staged COW entities;
 - `LinkOperation`, containing exact link identity and endpoints inline;
-- `PropertyOperation`, whose `change` contains the key plus current and previous optional values, while `intent.action` distinguishes set from erase;
+- `PropertyOperation`, whose `change` contains the complete property path plus current and previous optional leaf values, while `intent.action` distinguishes set from erase;
 - `ProtectionOperation`, `NodeSubgraphOperation`, `GraphInterfaceOperation`, and presentation operations;
 - `LinkPresentationOperation`, whose impact flags distinguish immutable style, route, geometry, protection, and lifecycle changes; style-only payloads do not copy the persistent route;
 - `GroupLifecycleOperation`, fixed-size `GroupGeometryOperation`, `GroupStyleOperation`, and delta-only `GroupMembershipOperation` without copying complete membership state.

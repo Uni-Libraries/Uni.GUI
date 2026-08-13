@@ -62,7 +62,7 @@ using ResolvePinSchemaFn =
     std::function<Result<std::vector<PinDescriptor>>(const PropertyBag &)>;
 
 struct ConfigurablePinSchema final {
-  std::vector<std::string> property_dependencies;
+  std::vector<PropertyPath> property_dependencies;
   ResolvePinSchemaFn resolve;
 };
 
@@ -74,7 +74,7 @@ public:
   NodePinSchema(std::initializer_list<PinDescriptor> pins) : m_fixed{pins} {}
   NodePinSchema(std::vector<PinDescriptor> pins)
       : m_fixed{std::move(pins)} {}
-  NodePinSchema(std::vector<std::string> property_dependencies,
+  NodePinSchema(std::vector<PropertyPath> property_dependencies,
                 ResolvePinSchemaFn resolve)
       : m_configurable{std::make_shared<const ConfigurablePinSchema>(
             ConfigurablePinSchema{std::move(property_dependencies),
@@ -126,7 +126,7 @@ struct NodeTypeDescriptor final {
   std::uint32_t version{1};
   NodePinSchema pin_schema;
   PropertyBag default_properties;
-  std::map<std::string, PropertyImpact> property_impacts;
+  std::map<PropertyPath, PropertyImpact> property_impacts;
   PropertyImpact undeclared_property_impact{PropertyImpact::Geometry};
   NodeBehaviorPtr behavior;
 
@@ -239,13 +239,13 @@ public:
   [[nodiscard]] NodeTypeDescriptorPtr Find(const TypeId &type) const noexcept;
   [[nodiscard]] PropertyImpact
   ResolvePropertyImpact(const TypeId &type,
-                        std::string_view key) const noexcept;
+                        const PropertyPath& path) const noexcept;
   [[nodiscard]] Result<std::vector<PinDescriptor>>
   ResolvePinSchema(const TypeId &type, const PropertyBag &properties) const;
   [[nodiscard]] std::span<const PinDescriptor>
   DefaultPinSchema(const TypeId &type) const noexcept;
   [[nodiscard]] bool PinSchemaDependsOn(const TypeId &type,
-                                        std::string_view property) const noexcept;
+                                        const PropertyPath& property) const noexcept;
   [[nodiscard]] std::vector<NodeTypeDescriptorPtr> Descriptors() const;
   [[nodiscard]] Result<NodeCreation>
   Instantiate(GraphDocument &document, const TypeId &type,
@@ -351,13 +351,13 @@ public:
   [[nodiscard]] NodeTypeDescriptorPtr Find(const TypeId &type) const noexcept;
   [[nodiscard]] PropertyImpact
   ResolvePropertyImpact(const TypeId &type,
-                        std::string_view key) const noexcept;
+                        const PropertyPath& path) const noexcept;
   [[nodiscard]] Result<std::vector<PinDescriptor>>
   ResolvePinSchema(const TypeId &type, const PropertyBag &properties) const;
   [[nodiscard]] std::span<const PinDescriptor>
   DefaultPinSchema(const TypeId &type) const noexcept;
   [[nodiscard]] bool PinSchemaDependsOn(const TypeId &type,
-                                        std::string_view property) const noexcept;
+                                        const PropertyPath& property) const noexcept;
   [[nodiscard]] Result<NodeCreation>
   Instantiate(GraphDocument &document, const TypeId &type,
               NodeInstantiationOptions options = {}) const;

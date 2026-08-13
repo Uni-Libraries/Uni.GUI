@@ -169,16 +169,19 @@ RegistrySnapshot::Find(const TypeId &type) const noexcept {
 }
 
 PropertyImpact RegistrySnapshot::ResolvePropertyImpact(
-    const TypeId &type, const std::string_view key) const noexcept {
+    const TypeId &type, const PropertyPath& path) const noexcept {
   const auto descriptor = Find(type);
   if (!descriptor)
     return PropertyImpact::Geometry;
-  const auto found = std::ranges::find_if(
-      descriptor->property_impacts,
-      [&](const auto &entry) { return entry.first == key; });
-  return found != descriptor->property_impacts.end()
-             ? found->second
-             : descriptor->undeclared_property_impact;
+  PropertyImpact impact = descriptor->undeclared_property_impact;
+  std::size_t specificity = 0;
+  for (const auto& [candidate, candidate_impact] : descriptor->property_impacts) {
+    if (candidate.IsPrefixOf(path) && candidate.segments.size() >= specificity) {
+      specificity = candidate.segments.size();
+      impact = candidate_impact;
+    }
+  }
+  return impact;
 }
 
 Result<std::vector<PinDescriptor>> RegistrySnapshot::ResolvePinSchema(
@@ -203,13 +206,16 @@ std::span<const PinDescriptor> RegistrySnapshot::DefaultPinSchema(
 }
 
 bool RegistrySnapshot::PinSchemaDependsOn(
-    const TypeId& type, const std::string_view property) const noexcept {
+    const TypeId& type, const PropertyPath& property) const noexcept {
     const auto descriptor = Find(type);
     if (!descriptor)
         return false;
     const auto& configurable = descriptor->pin_schema.Configurable();
-    return configurable != nullptr &&
-           std::ranges::contains(configurable->property_dependencies, property);
+    return configurable != nullptr && std::ranges::any_of(
+        configurable->property_dependencies,
+        [&](const PropertyPath& dependency) {
+          return dependency.IsPrefixOf(property) || property.IsPrefixOf(dependency);
+        });
 }
 
 std::vector<NodeTypeDescriptorPtr> RegistrySnapshot::Descriptors() const {
@@ -573,8 +579,8 @@ NodeTypeDescriptorPtr RegistryCatalog::Find(const TypeId &type) const noexcept {
 }
 
 PropertyImpact RegistryCatalog::ResolvePropertyImpact(
-    const TypeId &type, const std::string_view key) const noexcept {
-  return Snapshot().ResolvePropertyImpact(type, key);
+    const TypeId &type, const PropertyPath& path) const noexcept {
+  return Snapshot().ResolvePropertyImpact(type, path);
 }
 
 Result<std::vector<PinDescriptor>> RegistryCatalog::ResolvePinSchema(
@@ -589,7 +595,7 @@ std::span<const PinDescriptor> RegistryCatalog::DefaultPinSchema(
 }
 
 bool RegistryCatalog::PinSchemaDependsOn(
-    const TypeId& type, const std::string_view property) const noexcept {
+    const TypeId& type, const PropertyPath& property) const noexcept {
     return Snapshot().PinSchemaDependsOn(type, property);
 }
 

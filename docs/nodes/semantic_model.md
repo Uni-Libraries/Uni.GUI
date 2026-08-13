@@ -66,7 +66,7 @@ A `NodeInstance` stores its `TypeId`, persisted descriptor version, display name
 
 Every alternative, including vectors, typed references, arrays, objects, and opaque extensions, is valid at every nesting level. `PropertyBag` is the same ordered object type used inside a value, so configuration has one data model instead of separate flat and structured representations. Root property keys must be non-empty; generic nested object keys may be empty. All strings and keys must be valid UTF-8, numbers and vectors must be finite, and references require non-empty application-defined `type` and `value` strings.
 
-Use `GetIf<T>()`, `Get<T>()`, and `Is<T>()` to inspect values.
+Use `GetIf<T>()`, `Get<T>()`, and `Is<T>()` to inspect values. `PropertyPath` is a sequence whose first segment is a non-empty root property key; later segments are object keys or array indexes. `FindProperty()` resolves a borrowed nested value, while `SetProperty()` returns a modified `PropertyBag` without mutating its input. Erasing a path removes a root property or object member. To add, remove, or reorder array elements, replace the containing array so set and undo semantics remain exact.
 
 `PropertyLimits` bounds semantic depth, value count, container elements, and string bytes independently of JSON parsing. `ValidatePropertyValue()` and `ValidatePropertyBag()` are the common ingress contract used by graph mutation, registries, fragments, migrations, and persistence. `OpaqueProperty` contains one canonical typed JSON object for an unknown plugin kind and may occur at any depth; it is not a general extension map for arbitrary future graph fields.
 
@@ -95,7 +95,7 @@ Read-only flags are semantic protection. Presentation `locked` flags prevent edi
 - `value`: semantic values changed.
 - `layout`: semantic state that can affect node geometry changed.
 
-`NodeTypeDescriptor::property_impacts` maps property keys to revision domains:
+`NodeTypeDescriptor::property_impacts` maps property paths to revision domains. The most specific prefix of the changed path wins:
 
 | Impact | Revisions advanced |
 |---|---|
@@ -106,7 +106,7 @@ Read-only flags are semantic protection. Presentation `locked` flags prevent edi
 
 An undeclared property uses `undeclared_property_impact`, which defaults to `Geometry`. The impact selected on the first apply is retained by property undo and redo.
 
-Configurable pin schemas declare their property dependencies separately from this table. If resolving a dependency changes descriptor-owned pin metadata or order, the transaction also advances the required layout/topology domains. A label-only schema change advances layout; structural pin or connection changes advance layout and topology.
+Configurable pin schemas declare their property-path dependencies separately from this table. A change intersects a dependency when either path is a prefix of the other, so replacing a complete object and editing one declared leaf both trigger reconciliation. If resolving a dependency changes descriptor-owned pin metadata or order, the transaction also advances the required layout/topology domains. A label-only schema change advances layout; structural pin or connection changes advance layout and topology.
 
 `GraphPresentation::PresentationRevision()` advances for any persisted presentation change. `GeometryRevision()` advances only when geometry-relevant fields change; colors and locks do not invalidate geometry by themselves.
 

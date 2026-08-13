@@ -164,7 +164,7 @@ struct ReorderPinsOperation final {
     std::shared_ptr<const std::vector<PinId>> order;
 };
 struct PropertyChange final {
-    std::string key;
+    PropertyPath path;
     std::optional<PropertyValue> current;
     std::optional<PropertyValue> previous;
 };

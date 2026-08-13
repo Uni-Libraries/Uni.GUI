@@ -9,6 +9,7 @@ All notable changes to UniGUI are documented in this file.
 - Replaces flat and project-specific node property representations with one recursive `PropertyValue` API for nulls, scalars, vectors, typed references, arrays, objects, and opaque extensions.
 - Adds centralized semantic property validation, resource limits, and recursive copy accounting.
 - Replaces the version 4 property wire representation with exact version 5 recursive typed envelopes.
+- Adds one property-path contract across commands, UI editing, policy payloads, revision impacts, and configurable pin-schema dependencies.
 
 ## [3.0.0] - 2026-08-07
 

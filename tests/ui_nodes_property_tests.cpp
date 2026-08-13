@@ -43,6 +43,32 @@ void TestRecursiveValues() {
            "Recursive values must expose the same alternatives at every depth");
 }
 
+void TestPropertyPaths() {
+    PropertyBag properties{{"configuration", Fixture()}};
+    const PropertyPath name{"configuration", std::string{"inputs"}, std::size_t{1}, std::string{"name"}};
+    const auto* found = FindProperty(properties, name);
+    Expect(found != nullptr && found->Get<std::string>() == "right", "Property paths must resolve mixed object and array segments");
+
+    auto replaced = SetProperty(properties, name, PropertyValue{"renamed"});
+    Expect(replaced && FindProperty(*replaced, name)->Get<std::string>() == "renamed",
+           "Property paths must replace one nested value without changing the root API");
+
+    const PropertyPath source{"configuration", std::string{"inputs"}, std::size_t{0}, std::string{"source"}};
+    auto erased = SetProperty(*replaced, source, std::nullopt);
+    Expect(erased && FindProperty(*erased, source) == nullptr && FindProperty(*erased, name) != nullptr,
+           "Property paths must erase only the addressed nested value");
+
+    auto invalid_array_erase = SetProperty(
+        properties,
+        PropertyPath{"configuration", std::string{"inputs"}, std::size_t{0}},
+        std::nullopt);
+    Expect(!invalid_array_erase && invalid_array_erase.error().code == ErrorCode::InvalidArgument,
+           "Array element removal must replace the containing array to keep set and undo semantics exact");
+
+    Expect(PropertyPath{"configuration", std::string{"inputs"}}.IsPrefixOf(name),
+           "Property path prefix matching must support nested schema configuration");
+}
+
 void TestValidationAndLimits() {
     const PropertyValue valid = Fixture();
     Expect(ValidatePropertyValue(valid).has_value(), "A complete recursive property must validate");
@@ -73,6 +99,7 @@ void TestValidationAndLimits() {
 
 int main() {
     TestRecursiveValues();
+    TestPropertyPaths();
     TestValidationAndLimits();
     return EXIT_SUCCESS;
 }

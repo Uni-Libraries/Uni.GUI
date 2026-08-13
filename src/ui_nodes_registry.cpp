@@ -103,7 +103,7 @@ NormalizeNodeDescriptor(NodeTypeDescriptor &descriptor) {
       !ValidProperties(descriptor.default_properties) ||
       !ValidPropertyImpact(descriptor.undeclared_property_impact) ||
       !std::ranges::all_of(descriptor.property_impacts, [](const auto &entry) {
-        return !entry.first.empty() && ValidPropertyImpact(entry.second);
+        return entry.first.Root() != nullptr && !entry.first.Root()->empty() && ValidPropertyImpact(entry.second);
       })) {
     return std::unexpected(MakeError(ErrorCode::InvalidArgument,
                                      "Node descriptor requires a stable type, "
@@ -118,9 +118,9 @@ NormalizeNodeDescriptor(NodeTypeDescriptor &descriptor) {
           return std::unexpected(MakeError(ErrorCode::InvalidArgument,
                                            "Configurable pin schema requires a resolver"));
       }
-      std::unordered_set<std::string> dependencies;
-      for (const std::string& property : configurable->property_dependencies) {
-          if (property.empty()) {
+      std::set<PropertyPath> dependencies;
+      for (const PropertyPath& property : configurable->property_dependencies) {
+          if (property.Root() == nullptr || property.Root()->empty()) {
               return std::unexpected(MakeError(ErrorCode::InvalidArgument,
                                                "Pin schema property dependency cannot be empty"));
           }

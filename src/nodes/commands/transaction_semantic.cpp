@@ -762,13 +762,13 @@ Result<Link> GraphTransaction::RemoveLink(const GraphId graph, const LinkId link
     return result;
 }
 
-Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId node, std::string key,
+Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value) {
     const auto* current = Document().FindNode(graph, node);
     const PropertyImpact impact =
-        current != nullptr ? ResolvePropertyImpact(current->type, key) : PropertyImpact::Topology;
-    if (current == nullptr || !m_impl->registry.PinSchemaDependsOn(current->type, key)) {
-        return SetNodePropertyWithImpact(graph, node, std::move(key), std::move(value), impact);
+        current != nullptr ? ResolvePropertyImpact(current->type, path) : PropertyImpact::Topology;
+    if (current == nullptr || !m_impl->registry.PinSchemaDependsOn(current->type, path)) {
+        return SetNodePropertyWithImpact(graph, node, std::move(path), std::move(value), impact);
     }
     const auto descriptor = m_impl->registry.Find(current->type);
     if (!descriptor || current->type_version != descriptor->version) {
@@ -777,12 +777,9 @@ Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId
             "Node pin schema requires the exact registered descriptor version"));
     }
 
-    PropertyBag properties = current->properties;
-    if (value)
-        properties.insert_or_assign(key, *value);
-    else
-        properties.erase(key);
-    auto resolved = m_impl->registry.ResolvePinSchema(current->type, properties);
+    auto properties = Nodes::SetProperty(current->properties, path, value);
+    if (!properties) return std::unexpected(std::move(properties.error()));
+    auto resolved = m_impl->registry.ResolvePinSchema(current->type, *properties);
     if (!resolved)
         return std::unexpected(std::move(resolved.error()));
     auto plan = CommandDetail::PlanDescriptorPins(
@@ -796,7 +793,7 @@ Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId
                 "Property change requires explicit disconnection of incompatible pin links"));
         }
     }
-    if (auto property = SetNodePropertyWithImpact(graph, node, std::move(key),
+    if (auto property = SetNodePropertyWithImpact(graph, node, std::move(path),
                                                   std::move(value), impact);
         !property) {
         return property;
@@ -804,25 +801,24 @@ Result<void> GraphTransaction::SetNodeProperty(const GraphId graph, const NodeId
     return SetDescriptorPins(graph, node, plan->after);
 }
 
-PropertyImpact GraphTransaction::ResolvePropertyImpact(const TypeId& type, const std::string_view key) const noexcept {
+PropertyImpact GraphTransaction::ResolvePropertyImpact(const TypeId& type, const PropertyPath& path) const noexcept {
     return m_impl->registry.Find(type)
-        ? m_impl->registry.ResolvePropertyImpact(type, key)
+        ? m_impl->registry.ResolvePropertyImpact(type, path)
         : PropertyImpact::Topology;
 }
 
-Result<void> GraphTransaction::SetNodePropertyWithImpact(const GraphId graph, const NodeId node, std::string key,
+Result<void> GraphTransaction::SetNodePropertyWithImpact(const GraphId graph, const NodeId node, PropertyPath path,
                                                          std::optional<PropertyValue> value,
                                                          const PropertyImpact impact) {
-    if (key.empty()) {
-        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property key cannot be empty"));
+    if (path.Root() == nullptr || path.Root()->empty()) {
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path requires a non-empty root key"));
     }
     const auto* current = Document().FindNode(graph, node);
     if (current == nullptr) {
         return std::unexpected(MakeError(ErrorCode::NodeNotFound, "Node does not exist"));
     }
-    const auto found = current->properties.find(key);
-    const std::optional<PropertyValue> before =
-        found == current->properties.end() ? std::nullopt : std::optional<PropertyValue>{found->second};
+    const PropertyValue* found = Nodes::FindProperty(current->properties, path);
+    const std::optional<PropertyValue> before = found == nullptr ? std::nullopt : std::optional<PropertyValue>{*found};
     if (before == value) {
         return {};
     }
@@ -834,14 +830,23 @@ Result<void> GraphTransaction::SetNodePropertyWithImpact(const GraphId graph, co
     std::shared_ptr<const PropertyChange> change;
     if (m_impl->record_operations) {
         change = std::make_shared<const PropertyChange>(PropertyChange{
-            .key = key,
+            .path = path,
             .current = value,
             .previous = before,
         });
     }
     const OperationAction action = value ? OperationAction::Set : OperationAction::Erase;
     if (auto budget = m_impl->ConsumeOperations(); !budget) return budget;
-    auto result = m_impl->staged_document.SetNodeProperty(graph, node, std::move(key), std::move(value));
+    auto properties = Nodes::SetProperty(current->properties, path, value);
+    if (!properties) {
+        m_impl->ReleaseOperations();
+        return std::unexpected(std::move(properties.error()));
+    }
+    const std::string root = *path.Root();
+    const auto replacement = properties->find(root);
+    auto result = m_impl->staged_document.SetNodeProperty(
+        graph, node, root,
+        replacement == properties->end() ? std::nullopt : std::optional<PropertyValue>{replacement->second});
     if (!result) m_impl->ReleaseOperations();
     if (result) {
         m_impl->model_changed = true;

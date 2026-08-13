@@ -4,9 +4,13 @@
 #include <uni/gui/nodes/error.h>
 
 #include <compare>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <initializer_list>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -99,6 +103,31 @@ struct UNI_GUI_EXPORT PropertyValue final {
 
 using PropertyBag = PropertyValue::Object;
 
+using PropertyPathSegment = std::variant<std::string, std::size_t>;
+
+struct PropertyPath final {
+    std::vector<PropertyPathSegment> segments;
+
+    PropertyPath() = default;
+    PropertyPath(const char* property) : segments{std::string{property}} {}
+    PropertyPath(std::string property) : segments{std::move(property)} {}
+    PropertyPath(std::initializer_list<PropertyPathSegment> path) : segments(path) {}
+
+    [[nodiscard]] const std::string* Root() const noexcept {
+        return segments.empty() ? nullptr : std::get_if<std::string>(&segments.front());
+    }
+    [[nodiscard]] std::span<const PropertyPathSegment> Nested() const noexcept {
+        return segments.empty() ? std::span<const PropertyPathSegment>{}
+                                : std::span<const PropertyPathSegment>{segments}.subspan(1);
+    }
+    [[nodiscard]] bool IsPrefixOf(const PropertyPath& other) const noexcept {
+        return segments.size() <= other.segments.size() &&
+               std::equal(segments.begin(), segments.end(), other.segments.begin());
+    }
+
+    auto operator<=>(const PropertyPath&) const = default;
+};
+
 struct PropertyLimits final {
     std::size_t max_depth{128};
     std::size_t max_values{400'000};
@@ -107,6 +136,15 @@ struct PropertyLimits final {
     std::size_t max_string_bytes{16U * 1024U * 1024U};
     std::size_t max_total_string_bytes{64U * 1024U * 1024U};
 };
+
+[[nodiscard]] UNI_GUI_EXPORT const PropertyValue* FindProperty(
+    const PropertyBag& properties,
+    const PropertyPath& path) noexcept;
+
+[[nodiscard]] UNI_GUI_EXPORT Result<PropertyBag> SetProperty(
+    const PropertyBag& properties,
+    const PropertyPath& path,
+    std::optional<PropertyValue> value);
 
 [[nodiscard]] UNI_GUI_EXPORT Result<void> ValidatePropertyValue(
     const PropertyValue& value,

@@ -4132,7 +4132,7 @@ void TestBreakingPolicyArchitecture() {
         Expect(!operation.path.empty(), "Final policy checks must contain "
                                         "transaction leaves with command paths");
         const auto* property = operation.Get<PropertyOperation>();
-        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->key == "blocked") {
+        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->path == PropertyPath{"blocked"}) {
             denied_path = operation.path;
             return DenyOperation{"Property is locked"};
         }
@@ -4180,7 +4180,7 @@ void TestBreakingPolicyArchitecture() {
     capture_payload.evaluate_operation = [&](const OperationPolicyContext& context,
                                              const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
-        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->key == "payload") {
+        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->path == PropertyPath{"payload"}) {
             Expect(context.phase == OperationPhase::Execute, "Execute payload must use the execute phase");
             execute_payload = operation;
         }
@@ -4285,7 +4285,7 @@ void TestBreakingPolicyArchitecture() {
     replacement_policy.evaluate_operation = [&](const OperationPolicyContext&,
                                                 const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
-        if (property && property->change->key.starts_with("replacement-")) {
+        if (property && property->change->path.Root() && property->change->path.Root()->starts_with("replacement-")) {
             ++replacement_leaves;
             Expect(operation.path.size() == 2, "Replacement compound leaves must be restaged with child paths");
         }
@@ -4295,7 +4295,7 @@ void TestBreakingPolicyArchitecture() {
                                             const std::span<const OperationIntent> batch) -> BatchPolicyDecision {
         const bool replace = !replaced_root && std::ranges::any_of(batch, [](const OperationIntent& operation) {
             const auto* property = operation.Get<PropertyOperation>();
-            return property && property->change->key == "replace-original";
+            return property && property->change->path == PropertyPath{"replace-original"};
         });
         if (!replace) return AllowBatch{};
         replaced_root = true;
@@ -4407,7 +4407,7 @@ void TestBreakingPolicyArchitecture() {
                                          const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
         if (operation.kind == OperationKind::SetNodeProperty && property &&
-            property->change->key.starts_with("defer-")) {
+            property->change->path.Root() && property->change->path.Root()->starts_with("defer-")) {
             return DeferOperation{ApprovalRequest{73}};
         }
         return AllowOperation{};
@@ -4477,10 +4477,10 @@ void TestBreakingPolicyArchitecture() {
                                                   const OperationIntent& operation) -> OperationPolicyDecision {
         ++mixed_execute_callbacks;
         const auto* property = operation.Get<PropertyOperation>();
-        if (property && property->change->key == "mixed-execute-defer") {
+        if (property && property->change->path == PropertyPath{"mixed-execute-defer"}) {
             return DeferOperation{ApprovalRequest{101}};
         }
-        if (property && property->change->key == "mixed-execute-deny") {
+        if (property && property->change->path == PropertyPath{"mixed-execute-deny"}) {
             return DenyOperation{"Later execute leaf denied"};
         }
         return AllowOperation{};
@@ -4500,8 +4500,8 @@ void TestBreakingPolicyArchitecture() {
                                                   const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
         if (!property) return AllowOperation{};
-        if (property->change->key == "multi-defer-a") return DeferOperation{ApprovalRequest{201}};
-        if (property->change->key == "multi-defer-b") return DeferOperation{ApprovalRequest{202}};
+        if (property->change->path == PropertyPath{"multi-defer-a"}) return DeferOperation{ApprovalRequest{201}};
+        if (property->change->path == PropertyPath{"multi-defer-b"}) return DeferOperation{ApprovalRequest{202}};
         return AllowOperation{};
     };
     auto multiple_deferred = commands.Execute(property_compound("Multiple defer", "multi-defer-a", "multi-defer-b"),
@@ -4566,14 +4566,14 @@ void TestBreakingPolicyArchitecture() {
         ++priority_callbacks;
         const auto* property = operation.Get<PropertyOperation>();
         if (!property) return AllowOperation{};
-        if (property->change->key == "priority-defer") return DeferOperation{ApprovalRequest{301}};
+        if (property->change->path == PropertyPath{"priority-defer"}) return DeferOperation{ApprovalRequest{301}};
         return AllowOperation{};
     };
     replace_over_defer.evaluate_batch = [&](const BatchPolicyContext&,
                                             const std::span<const OperationIntent> batch) -> BatchPolicyDecision {
         const bool replace = std::ranges::any_of(batch, [](const OperationIntent& operation) {
             const auto* property = operation.Get<PropertyOperation>();
-            return property && property->change->key == "priority-replace";
+            return property && property->change->path == PropertyPath{"priority-replace"};
         });
         if (!replace) return AllowBatch{};
         return ReplaceBatch{[&] {
@@ -4619,7 +4619,7 @@ void TestBreakingPolicyArchitecture() {
                                                const OperationIntent& operation) -> OperationPolicyDecision {
         ++deny_over_replace_callbacks;
         const auto* property = operation.Get<PropertyOperation>();
-        if (property && property->change->key == "deny-priority-deny") {
+        if (property && property->change->path == PropertyPath{"deny-priority-deny"}) {
             return DenyOperation{"Deny overrides replacement"};
         }
         return AllowOperation{};
@@ -4678,8 +4678,8 @@ void TestBreakingPolicyArchitecture() {
                                                const OperationIntent& operation) -> OperationPolicyDecision {
         ++mixed_undo_callbacks;
         const auto* property = operation.Get<PropertyOperation>();
-        if (property && property->change->key == "mixed-history-b") return DeferOperation{ApprovalRequest{501}};
-        if (property && property->change->key == "mixed-history-a") return DenyOperation{"Later undo leaf denied"};
+        if (property && property->change->path == PropertyPath{"mixed-history-b"}) return DeferOperation{ApprovalRequest{501}};
+        if (property && property->change->path == PropertyPath{"mixed-history-a"}) return DenyOperation{"Later undo leaf denied"};
         return AllowOperation{};
     };
     auto mixed_undo =
@@ -4702,8 +4702,8 @@ void TestBreakingPolicyArchitecture() {
                                                const OperationIntent& operation) -> OperationPolicyDecision {
         ++mixed_redo_callbacks;
         const auto* property = operation.Get<PropertyOperation>();
-        if (property && property->change->key == "mixed-history-a") return DeferOperation{ApprovalRequest{601}};
-        if (property && property->change->key == "mixed-history-b") return DenyOperation{"Later redo leaf denied"};
+        if (property && property->change->path == PropertyPath{"mixed-history-a"}) return DeferOperation{ApprovalRequest{601}};
+        if (property && property->change->path == PropertyPath{"mixed-history-b"}) return DenyOperation{"Later redo leaf denied"};
         return AllowOperation{};
     };
     auto mixed_redo = mixed_history.Redo(document, presentation, types, mixed_redo_policy);
@@ -4764,7 +4764,7 @@ void TestBreakingPolicyArchitecture() {
         moved_defer.evaluate_operation = [](const OperationPolicyContext&,
                                             const OperationIntent& operation) -> OperationPolicyDecision {
             const auto* property = operation.Get<PropertyOperation>();
-            return property && property->change->key == "moved-owner"
+            return property && property->change->path == PropertyPath{"moved-owner"}
                        ? OperationPolicyDecision{DeferOperation{ApprovalRequest{701}}}
                        : OperationPolicyDecision{AllowOperation{}};
         };
@@ -4793,7 +4793,7 @@ void TestBreakingPolicyArchitecture() {
     deny_inverse.evaluate_operation = [&](const OperationPolicyContext& context,
                                           const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
-        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->key == "history-policy") {
+        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->path == PropertyPath{"history-policy"}) {
             saw_inverse = context.phase == OperationPhase::Undo && operation.action == OperationAction::Erase &&
                           property->change->previous == std::optional<PropertyValue>{PropertyValue{std::int64_t{88}}};
             return DenyOperation{"Current policy denies inverse"};
@@ -4819,7 +4819,7 @@ void TestBreakingPolicyArchitecture() {
     deny_forward.evaluate_operation = [&](const OperationPolicyContext& context,
                                           const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
-        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->key == "history-policy") {
+        if (operation.kind == OperationKind::SetNodeProperty && property && property->change->path == PropertyPath{"history-policy"}) {
             saw_forward = context.phase == OperationPhase::Redo && operation.action == OperationAction::Set &&
                           property->change->current == std::optional<PropertyValue>{PropertyValue{std::int64_t{88}}};
             return DenyOperation{"Current policy denies forward"};
@@ -4929,7 +4929,7 @@ void TestBreakingPolicyArchitecture() {
     reauthorize_defer.evaluate_operation = [](const OperationPolicyContext&,
                                               const OperationIntent& operation) -> OperationPolicyDecision {
         const auto* property = operation.Get<PropertyOperation>();
-        return property && property->change->key == "resume-reauthorize"
+        return property && property->change->path == PropertyPath{"resume-reauthorize"}
                    ? OperationPolicyDecision{DeferOperation{ApprovalRequest{902}}}
                    : OperationPolicyDecision{AllowOperation{}};
     };

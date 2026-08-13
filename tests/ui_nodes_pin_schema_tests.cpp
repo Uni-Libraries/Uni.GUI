@@ -422,6 +422,49 @@ void TestSchemaRevisionDomains() {
            "Label-only schema changes must not invalidate topology revisions");
 }
 
+void TestNestedPropertyDependencies() {
+    RegistryCatalog registry;
+    Expect(registry.RegisterNodeType(NodeTypeDescriptor{
+               .type = TypeId{"projection.nested"},
+               .display_name = "Nested projection",
+               .pin_schema = NodePinSchema{
+                   {PropertyPath{"configuration", std::string{"enabled"}}},
+                   [](const PropertyBag& properties) -> Result<std::vector<PinDescriptor>> {
+                       const auto* enabled = FindProperty(
+                           properties, PropertyPath{"configuration", std::string{"enabled"}});
+                       if (enabled == nullptr || !enabled->Get<bool>()) return std::vector<PinDescriptor>{};
+                       return std::vector<PinDescriptor>{PinDescriptor{
+                           .key = "value",
+                           .type = TypeId{"float"},
+                           .direction = PinDirection::Output,
+                       }};
+                   }},
+               .default_properties = {{"configuration", PropertyValue::Object{{"enabled", false}, {"label", "kept"}}}},
+               .property_impacts = {{PropertyPath{"configuration", std::string{"enabled"}}, PropertyImpact::Topology}},
+           }).has_value(),
+           "Nested projection descriptor must register");
+
+    GraphDocument document;
+    GraphPresentation presentation;
+    CommandStack commands;
+    const GraphId graph = document.RootGraph();
+    auto creation = registry.Instantiate(document, TypeId{"projection.nested"});
+    Expect(creation && creation->pins.empty(), "Nested dependency defaults must resolve");
+    const NodeId node = creation->node.id;
+    Execute(commands, std::make_unique<AddNodeCommand>(graph, std::move(*creation)), document, presentation,
+            registry, "Nested dependency node must be added");
+    Execute(commands,
+            std::make_unique<SetNodePropertyCommand>(
+                graph, node, PropertyPath{"configuration", std::string{"enabled"}}, PropertyValue{true}),
+            document, presentation, registry, "Nested dependency edit must execute");
+    const auto* state = document.FindNode(graph, node);
+    Expect(state != nullptr && state->pins.size() == 1 &&
+               FindProperty(state->properties, PropertyPath{"configuration", std::string{"label"}})->Get<std::string>() == "kept",
+           "Nested dependency edits must reconcile pins and preserve sibling values");
+    Expect(commands.Undo(document, presentation, registry).has_value() && document.FindNode(graph, node)->pins.empty(),
+           "Nested dependency undo must restore the exact schema");
+}
+
 [[nodiscard]] NodeTypeDescriptor IntergraphProjectionDescriptor() {
     return NodeTypeDescriptor{
         .type = TypeId{"projection.intergraph-output"},
@@ -508,6 +551,7 @@ int main() {
     TestTransactionMutationBoundary();
     TestHistoryRejectsSchemaReplacement();
     TestSchemaRevisionDomains();
+    TestNestedPropertyDependencies();
     TestIntergraphProjectionCleanup();
     return EXIT_SUCCESS;
 }

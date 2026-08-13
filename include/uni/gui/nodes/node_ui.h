@@ -48,12 +48,12 @@ public:
     [[nodiscard]] bool ReadOnly() const noexcept;
     [[nodiscard]] float ToScreen(float logical_size) const noexcept;
     [[nodiscard]] Vec2 ToScreen(Vec2 logical_size) const noexcept;
-    [[nodiscard]] const PropertyValue* FindProperty(std::string_view key) const;
+    [[nodiscard]] const PropertyValue* FindProperty(const PropertyPath& path) const;
 
     void Submit(std::unique_ptr<Command> command);
-    void SetProperty(std::string key, std::optional<PropertyValue> value);
+    void SetProperty(PropertyPath path, std::optional<PropertyValue> value);
     // Call immediately after an ImGui editing item to coalesce its active gesture.
-    void EditProperty(std::string key, PropertyValue value, bool changed);
+    void EditProperty(PropertyPath path, PropertyValue value, bool changed);
     [[nodiscard]] PinId AddDynamicPin(
         PinDescriptor descriptor,
         std::size_t index = std::numeric_limits<std::size_t>::max());

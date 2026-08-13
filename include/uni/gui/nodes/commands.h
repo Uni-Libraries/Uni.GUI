@@ -116,7 +116,7 @@ class UNI_GUI_EXPORT GraphTransaction final {
     [[nodiscard]] Result<void> ReorderDynamicPins(GraphId graph, NodeId node, std::vector<PinId> order);
     [[nodiscard]] Result<void> AddLink(GraphId graph, Link link, std::optional<Link> replacing = std::nullopt);
     [[nodiscard]] Result<Link> RemoveLink(GraphId graph, LinkId link);
-    [[nodiscard]] Result<void> SetNodeProperty(GraphId graph, NodeId node, std::string key,
+    [[nodiscard]] Result<void> SetNodeProperty(GraphId graph, NodeId node, PropertyPath path,
                                                std::optional<PropertyValue> value);
     [[nodiscard]] Result<void> SetNodeDisplayName(GraphId graph, NodeId node, std::string name);
     [[nodiscard]] Result<void> SetNodeSubgraph(GraphId graph, NodeId node, std::optional<SubgraphReference> subgraph);
@@ -164,8 +164,8 @@ class UNI_GUI_EXPORT GraphTransaction final {
     [[nodiscard]] Result<ConnectionResult> AuthorizeConnection(const ConnectionRequest& request);
     [[nodiscard]] Result<void> AddPlannedLink(GraphId graph, Link link);
     [[nodiscard]] Result<Link> RemovePlannedLink(GraphId graph, LinkId link);
-    [[nodiscard]] PropertyImpact ResolvePropertyImpact(const TypeId& type, std::string_view key) const noexcept;
-    [[nodiscard]] Result<void> SetNodePropertyWithImpact(GraphId graph, NodeId node, std::string key,
+    [[nodiscard]] PropertyImpact ResolvePropertyImpact(const TypeId& type, const PropertyPath& path) const noexcept;
+    [[nodiscard]] Result<void> SetNodePropertyWithImpact(GraphId graph, NodeId node, PropertyPath path,
                                                          std::optional<PropertyValue> value, PropertyImpact impact);
     [[nodiscard]] Result<void> SetDescriptorPins(GraphId graph, NodeId node, std::span<const PinInstance> pins);
     [[nodiscard]] Result<void> ReplaceGraph(Graph graph);
@@ -384,11 +384,11 @@ class UNI_GUI_EXPORT SetNodePropertyCommand final : public Command {
         bool final{true};
     };
 
-    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value);
-    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value,
+    SetNodePropertyCommand(GraphId graph, NodeId node, PropertyPath path, std::optional<PropertyValue> value);
+    SetNodePropertyCommand(GraphId graph, NodeId node, PropertyPath path, std::optional<PropertyValue> value,
                            InvalidConnectionPolicy invalid_connections);
-    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value, Edit edit);
-    SetNodePropertyCommand(GraphId graph, NodeId node, std::string key, std::optional<PropertyValue> value, Edit edit,
+    SetNodePropertyCommand(GraphId graph, NodeId node, PropertyPath path, std::optional<PropertyValue> value, Edit edit);
+    SetNodePropertyCommand(GraphId graph, NodeId node, PropertyPath path, std::optional<PropertyValue> value, Edit edit,
                            InvalidConnectionPolicy invalid_connections);
     UNI_GUI_NODE_COMMAND_DECLARATION(SetNodePropertyCommand);
     [[nodiscard]] bool TryMerge(const Command& newer) override;

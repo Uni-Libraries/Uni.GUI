@@ -73,6 +73,20 @@ descriptor.default_properties = {{
 
 Application-defined reference namespaces and string identities avoid assumptions about asset databases, URI schemes, or numeric ID allocation. Use `OpaqueProperty` only to preserve unknown typed extension envelopes; known configuration should use the built-in recursive kinds.
 
+Custom UI addresses nested values with the same `PropertyPath` used by descriptors, policy payloads, and commands:
+
+```cpp
+ui.draw_inspector = [](NodeUiContext& context) {
+    const PropertyPath enabled{"configuration", std::string{"enabled"}};
+    const PropertyValue* property = context.FindProperty(enabled);
+    bool value = property != nullptr && property->Get<bool>();
+    const bool changed = ImGui::Checkbox("Enabled", &value);
+    context.EditProperty(enabled, value, changed);
+};
+```
+
+`SetNodePropertyCommand` and `NodeUiContext` accept the complete path. Nested edits remain one atomic history entry, preserve unrelated siblings, report the same path to operation policies, select the most specific declared impact, and reconcile any intersecting pin-schema dependency.
+
 `NodePinSchema` is the single source of descriptor-owned pin metadata. A braced list creates a fixed schema. `Instantiate()` copies defaults, applies `NodeInstantiationOptions::property_overrides`, resolves the schema, allocates node and pin IDs, marks descriptor-owned pins `PinStorage::Static`, and sets `type_version` to the descriptor version. `PinStorage::Static` describes ownership, not lifetime: a configurable descriptor may reconcile those pins when a declared dependency changes. Instance-owned dynamic pins retain `PinStorage::Dynamic` and must have unique semantic keys.
 
 ### Configurable Pin Schemas

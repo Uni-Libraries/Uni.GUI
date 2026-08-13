@@ -129,10 +129,9 @@ int main() {
     valid = valid && node_ui_registry.Register(Nodes::NodeUiDescriptor{
         .type = Nodes::TypeId{"package.node"},
         .draw_body = [](Nodes::NodeUiContext& context) {
-            context.SetProperty("value", Nodes::PropertyValue::Object{
-                {"amount", 2.0},
-                {"source", Nodes::PropertyReference{.type = "package.asset", .value = "default"}},
-            });
+            context.SetProperty(
+                Nodes::PropertyPath{"value", std::string{"amount"}},
+                Nodes::PropertyValue{2.0});
         },
         .default_size = {200.0f, 100.0f},
     }).has_value();

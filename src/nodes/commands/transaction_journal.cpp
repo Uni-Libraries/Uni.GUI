@@ -128,7 +128,7 @@ void GraphTransaction::Impl::RecordGraphReplaced(const Graph& before, const Grap
                     value != replacement->properties.end() ? OperationAction::Set : OperationAction::Erase,
                     PropertyOperation{after.id, node_id,
                                       std::make_shared<const PropertyChange>(PropertyChange{
-                                          .key = key,
+                                          .path = PropertyPath{key},
                                           .current = value != replacement->properties.end()
                                                          ? std::optional<PropertyValue>{value->second}
                                                          : std::nullopt,
@@ -140,7 +140,7 @@ void GraphTransaction::Impl::RecordGraphReplaced(const Graph& before, const Grap
             Record({OperationKind::SetNodeProperty, OperationAction::Set,
                     PropertyOperation{after.id, node_id,
                                       std::make_shared<const PropertyChange>(PropertyChange{
-                                          .key = key,
+                                          .path = PropertyPath{key},
                                           .current = property,
                                       })}});
         }

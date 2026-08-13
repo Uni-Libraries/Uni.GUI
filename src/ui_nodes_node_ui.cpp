@@ -97,9 +97,8 @@ bool NodeUiContext::ReadOnly() const noexcept { return m_read_only; }
 float NodeUiContext::ToScreen(const float logical_size) const noexcept { return logical_size * ScreenScale(); }
 Vec2 NodeUiContext::ToScreen(const Vec2 logical_size) const noexcept { return logical_size * ScreenScale(); }
 
-const PropertyValue* NodeUiContext::FindProperty(const std::string_view key) const {
-    const auto found = m_node->properties.find(key);
-    return found != m_node->properties.end() ? &found->second : nullptr;
+const PropertyValue* NodeUiContext::FindProperty(const PropertyPath& path) const {
+    return Nodes::FindProperty(m_node->properties, path);
 }
 
 void NodeUiContext::Submit(std::unique_ptr<Command> command) {
@@ -108,15 +107,15 @@ void NodeUiContext::Submit(std::unique_ptr<Command> command) {
     }
 }
 
-void NodeUiContext::SetProperty(std::string key, std::optional<PropertyValue> value) {
+void NodeUiContext::SetProperty(PropertyPath path, std::optional<PropertyValue> value) {
     Submit(std::make_unique<SetNodePropertyCommand>(
         m_graph,
         m_node->id,
-        std::move(key),
+        std::move(path),
         std::move(value)));
 }
 
-void NodeUiContext::EditProperty(std::string key, PropertyValue value, const bool changed) {
+void NodeUiContext::EditProperty(PropertyPath path, PropertyValue value, const bool changed) {
     const bool final = ImGui::IsItemDeactivatedAfterEdit();
     const bool active = ImGui::IsItemActive();
     const bool begin = ImGui::IsItemActivated();
@@ -124,7 +123,7 @@ void NodeUiContext::EditProperty(std::string key, PropertyValue value, const boo
         return;
     }
     if (!active && !final) {
-        SetProperty(std::move(key), std::move(value));
+        SetProperty(std::move(path), std::move(value));
         return;
     }
 
@@ -136,8 +135,16 @@ void NodeUiContext::EditProperty(std::string key, PropertyValue value, const boo
     mix(m_graph.Value());
     mix(m_node->id.Value());
     mix(ImGui::GetItemID());
-    for (const unsigned char character : key) {
-        mix(character);
+    for (const auto& segment : path.segments) {
+        std::visit([&](const auto& item) {
+            using Item = std::remove_cvref_t<decltype(item)>;
+            if constexpr (std::same_as<Item, std::string>) {
+                for (const unsigned char character : item) mix(character);
+            } else {
+                mix(item);
+            }
+            mix(0xFFU);
+        }, segment);
     }
     if (merge_key == 0) {
         merge_key = 1;
@@ -145,7 +152,7 @@ void NodeUiContext::EditProperty(std::string key, PropertyValue value, const boo
     Submit(std::make_unique<SetNodePropertyCommand>(
         m_graph,
         m_node->id,
-        std::move(key),
+        std::move(path),
         std::move(value),
         SetNodePropertyCommand::Edit{
             .merge_key = merge_key,

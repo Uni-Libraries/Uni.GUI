@@ -49,6 +49,102 @@ PropertyValue::PropertyValue(Array item) : value(std::move(item)) {}
 PropertyValue::PropertyValue(Object item) : value(std::move(item)) {}
 PropertyValue::PropertyValue(OpaqueProperty item) : value(std::move(item)) {}
 
+namespace {
+
+Result<PropertyValue> ReplaceNested(
+    const PropertyValue& root,
+    const std::span<const PropertyPathSegment> path,
+    const std::optional<PropertyValue>& value) {
+    if (path.empty()) {
+        if (!value)
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "A nested path value cannot be erased from its parentless root"));
+        return *value;
+    }
+    if (const auto* key = std::get_if<std::string>(&path.front())) {
+        const auto* source = root.GetIf<PropertyValue::Object>();
+        if (source == nullptr)
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path requires an object"));
+        PropertyValue::Object object = *source;
+        const auto found = object.find(*key);
+        if (path.size() == 1) {
+            if (value) object.insert_or_assign(*key, *value);
+            else if (found != object.end()) object.erase(found);
+            else return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path does not exist"));
+            return object;
+        }
+        if (found == object.end())
+            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path does not exist"));
+        auto replaced = ReplaceNested(found->second, path.subspan(1), value);
+        if (!replaced) return replaced;
+        found->second = std::move(*replaced);
+        return object;
+    }
+    const auto* source = root.GetIf<PropertyValue::Array>();
+    const std::size_t index = std::get<std::size_t>(path.front());
+    if (source == nullptr || index >= source->size())
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path array index does not exist"));
+    PropertyValue::Array array = *source;
+    if (path.size() == 1) {
+        if (!value)
+            return std::unexpected(MakeError(
+                ErrorCode::InvalidArgument,
+                "Array elements cannot be erased by a property set; replace the containing array instead"));
+        array[index] = *value;
+        return array;
+    }
+    auto replaced = ReplaceNested(array[index], path.subspan(1), value);
+    if (!replaced) return replaced;
+    array[index] = std::move(*replaced);
+    return array;
+}
+
+} // namespace
+
+const PropertyValue* FindProperty(const PropertyBag& properties, const PropertyPath& path) noexcept {
+    const std::string* root = path.Root();
+    if (root == nullptr || root->empty()) return nullptr;
+    const auto found = properties.find(*root);
+    if (found == properties.end()) return nullptr;
+    const PropertyValue* current = &found->second;
+    for (const auto& segment : path.Nested()) {
+        if (const auto* key = std::get_if<std::string>(&segment)) {
+            const auto* object = current->GetIf<PropertyValue::Object>();
+            if (object == nullptr) return nullptr;
+            const auto child = object->find(*key);
+            if (child == object->end()) return nullptr;
+            current = &child->second;
+        } else {
+            const auto* array = current->GetIf<PropertyValue::Array>();
+            const std::size_t index = std::get<std::size_t>(segment);
+            if (array == nullptr || index >= array->size()) return nullptr;
+            current = &(*array)[index];
+        }
+    }
+    return current;
+}
+
+Result<PropertyBag> SetProperty(
+    const PropertyBag& properties,
+    const PropertyPath& path,
+    std::optional<PropertyValue> value) {
+    const std::string* root = path.Root();
+    if (root == nullptr || root->empty())
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path requires a non-empty root key"));
+    PropertyBag result = properties;
+    const auto found = result.find(*root);
+    if (path.segments.size() == 1) {
+        if (value) result.insert_or_assign(*root, std::move(*value));
+        else result.erase(*root);
+        return result;
+    }
+    if (found == result.end())
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path root does not exist"));
+    auto replacement = ReplaceNested(found->second, path.Nested(), value);
+    if (!replacement) return std::unexpected(std::move(replacement.error()));
+    found->second = std::move(*replacement);
+    return result;
+}
+
 Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLimits& limits) {
     struct Pending final {
         const PropertyValue* value;
