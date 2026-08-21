@@ -306,7 +306,9 @@ Result<void> NodeUiRegistry::RegisterHeaderGlyph(NodeHeaderGlyphDescriptor descr
 }
 
 bool NodeUiRegistry::UnregisterHeaderGlyph(const std::string_view id) {
-    if (m_impl->header_glyphs.erase(id) == 0) return false;
+    const auto found = m_impl->header_glyphs.find(id);
+    if (found == m_impl->header_glyphs.end()) return false;
+    m_impl->header_glyphs.erase(found);
     ++m_impl->revision;
     return true;
 }
