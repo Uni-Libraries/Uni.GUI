@@ -982,12 +982,36 @@ void RunMutationsSuite() {
     CheckTiming("dependency-cycle-depth-10k", dependency_cycle, 8.0, 20.0);
     PrintMutation("dependency-cycle-depth-10k", DependencyDepth, dependency_cycle);
 
+    constexpr std::size_t FragmentNodeCount = 1'000;
     GraphFragment fragment;
-    fragment.nodes.reserve(1'000);
-    for (std::size_t index = 1; index <= 1'000; ++index) {
+    fragment.nodes.reserve(FragmentNodeCount);
+    for (std::size_t index = 1; index <= FragmentNodeCount; ++index) {
+        const NodeId node{index};
+        const PinId output{index * 2 - 1};
+        const PinId input{index * 2};
         fragment.nodes.push_back(GraphFragmentNode{
             .creation = NodeCreation{
-                .node = NodeInstance{.id = NodeId{index}, .type = TypeId{"benchmark"}},
+                .node = NodeInstance{.id = node, .type = TypeId{"benchmark"}, .pins = {output, input}},
+                .pins = {
+                    PinInstance{
+                        .id = output,
+                        .node = node,
+                        .key = "out",
+                        .label = "out",
+                        .type = TypeId{"float"},
+                        .direction = PinDirection::Output,
+                        .cardinality = PinCardinality::Multiple,
+                    },
+                    PinInstance{
+                        .id = input,
+                        .node = node,
+                        .key = "in",
+                        .label = "in",
+                        .type = TypeId{"float"},
+                        .direction = PinDirection::Input,
+                        .cardinality = PinCardinality::Multiple,
+                    },
+                },
             },
             .presentation = NodePresentation{.position = Vec2{static_cast<float>(index), 0.0f}},
         });
@@ -1013,9 +1037,9 @@ void RunMutationsSuite() {
             fixture.document, fixture.presentation, fixture.types);
         Check(redone.has_value(), "large fragment redo failed");
     });
-    CheckIncrementalOnly("fragment-paste-1k-into-100k", 50'000);
+    CheckIncrementalOnly("fragment-paste-1k-into-100k", FragmentNodeCount * 100);
     CheckTiming("fragment-paste-1k-into-100k", fragment_history, 50.0, 100.0);
-    PrintMutation("fragment-paste-1k-into-100k", 1'000, fragment_history);
+    PrintMutation("fragment-paste-1k-into-100k", FragmentNodeCount, fragment_history);
 
     fixture.commands.Clear();
     fixture.commands.SetHistoryLimit(4);

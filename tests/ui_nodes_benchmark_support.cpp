@@ -258,18 +258,21 @@ Fixture::Fixture(const FixtureConfig& config) {
                                            .id = output,
                                            .node = node,
                                            .key = "out",
+                                           .label = "out",
                                            .type = TypeId{"float"},
                                            .direction = PinDirection::Output,
                                            .cardinality = PinCardinality::Multiple,
                                        });
-        auto [input_position, input_inserted] = graph.pins.emplace(input, PinInstance{
-                                                                              .id = input,
-                                                                              .node = node,
-                                                                              .key = "in",
-                                                                              .type = TypeId{"float"},
-                                                                              .direction = PinDirection::Input,
-                                                                              .cardinality = PinCardinality::Multiple,
-                                                                          });
+        auto [input_position, input_inserted] =
+            graph.pins.emplace(input, PinInstance{
+                                          .id = input,
+                                          .node = node,
+                                          .key = "in",
+                                          .label = "in",
+                                          .type = TypeId{"float"},
+                                          .direction = PinDirection::Input,
+                                          .cardinality = PinCardinality::Multiple,
+                                      });
         (void)node_position;
         (void)output_position;
         (void)input_position;
