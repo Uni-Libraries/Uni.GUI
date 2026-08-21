@@ -25,6 +25,8 @@ option(UNIGUI_BUILD_TESTS "Build UniGUI tests" ${PROJECT_IS_TOP_LEVEL})
 option(UNIGUI_ENABLE_RUNTIME_TESTS "Enable tests that require a graphical display" OFF)
 option(UNIGUI_BUILD_TEST_ENGINE_TESTS "Build Dear ImGui Test Engine integration tests" OFF)
 option(UNIGUI_BUILD_BENCHMARKS "Build UniGUI performance regression benchmarks" OFF)
+set(UNIGUI_NODES_STATE_MACHINE_TEST_STEPS "5000" CACHE STRING
+    "Number of randomized state-machine steps per CTest seed")
 option(UNIGUI_INSTALL "Generate UniGUI install rules" ${PROJECT_IS_TOP_LEVEL})
 option(UNIGUI_ENABLE_ABI_BASELINE_CHECK "Compare the shared UniGUI library with a libabigail baseline" OFF)
 set(UNIGUI_ABI_BASELINE_DIR "" CACHE PATH

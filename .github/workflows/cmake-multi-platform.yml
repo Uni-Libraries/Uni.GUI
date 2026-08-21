@@ -329,6 +329,7 @@ jobs:
           -DUNIGUI_BUILD_TESTS=ON
           -DUNIGUI_ENABLE_RUNTIME_TESTS=ON
           -DUNIGUI_BUILD_TEST_ENGINE_TESTS=ON
+          -DUNIGUI_NODES_STATE_MACHINE_TEST_STEPS=500
           -DUNIGUI_INSTALL=OFF
           -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
           -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"

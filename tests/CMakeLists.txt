@@ -79,7 +79,9 @@ set_target_properties(unigui_nodes_state_machine_tests PROPERTIES CXX_EXTENSIONS
 foreach(seed IN ITEMS 0xC0FFEE 0x5EED1234 0xA11CE55 0xDEADBEEF)
     add_test(
         NAME "unigui.nodes-state-machine.${seed}"
-        COMMAND unigui_nodes_state_machine_tests --seed "${seed}" --steps 5000
+        COMMAND unigui_nodes_state_machine_tests
+            --seed "${seed}"
+            --steps "${UNIGUI_NODES_STATE_MACHINE_TEST_STEPS}"
     )
     set_tests_properties("unigui.nodes-state-machine.${seed}" PROPERTIES
         LABELS "nodes-state-machine"
