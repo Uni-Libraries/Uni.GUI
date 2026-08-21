@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
+  SDL_COMMIT_ID: 147a8ee32dbf9ac02f3794964490687b6bbda1bc
   SDL_PREFIX: ${{ github.workspace }}/../sdl3
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Checkout pinned SDL 3.4.12
+      - name: Checkout pinned SDL 3.4.14
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: libsdl-org/SDL
@@ -46,7 +46,7 @@ jobs:
             libudev-dev libthai-dev libpipewire-0.3-dev libwayland-dev \
             libdecor-0-dev liburing-dev libusb-1.0-0-dev
 
-      - name: Build and install pinned SDL 3.4.12
+      - name: Build and install pinned SDL 3.4.14
         run: |
           cmake -G Ninja \
             -S "${{ github.workspace }}/sdl-source" \

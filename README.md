@@ -12,7 +12,7 @@ The current version is `4.0.0`, released on 2026-08-13. Release details are in t
 - Initialized Dear ImGui and ImPlot submodules
 
 The CI matrix covers Linux with GCC and Clang, Windows with MSVC, and macOS on Intel and ARM64 with AppleClang. Debug, Release, shared, static, sanitizers, Dear ImGui Test Engine, installation, and an external package consumer are checked.
-Linux CI and release jobs build SDL 3.4.12 from a pinned commit; Windows and macOS use the pinned vcpkg SDL 3.4.12 port.
+Linux CI and release jobs build SDL 3.4.14 from a pinned commit; Windows and macOS use SDL from the runner-provided vcpkg, currently 3.4.14.
 
 ## Build
 

@@ -15,8 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VCPKG_COMMIT_ID: 1600ce2ba1b6b621bfc5a31a785c4963b817a1c7
-  SDL_COMMIT_ID: f87239e71e42da91ca317a12eefb82cfbf3393eb
+  SDL_COMMIT_ID: 147a8ee32dbf9ac02f3794964490687b6bbda1bc
   SDL_PREFIX: ${{ github.workspace }}/../sdl3
   SYNTHETIC_RELEASE_TAG: v4.0.0
   ABI_MAJOR: 4
@@ -67,6 +66,7 @@ jobs:
     env:
       SDL_C_COMPILER: ${{ matrix.c_compiler }}
       SDL_BUILD_TYPE: ${{ matrix.build_type }}
+      VCPKG_ROOT: ${{ matrix.vcpkg_root }}
 
     strategy:
       fail-fast: false
@@ -91,12 +91,14 @@ jobs:
             c_compiler: cl
             cxx_compiler: cl
             vcpkg_triplet: x64-windows
+            vcpkg_root: C:/vcpkg
           - compiler: apple-clang-x64
             name: macOS AppleClang x64
             os: macos-26-intel
             c_compiler: clang
             cxx_compiler: clang++
             vcpkg_triplet: x64-osx
+            vcpkg_root: /usr/local/share/vcpkg
             osx_architecture: x86_64
           - compiler: apple-clang-arm64
             name: macOS AppleClang ARM64
@@ -104,13 +106,14 @@ jobs:
             c_compiler: clang
             cxx_compiler: clang++
             vcpkg_triplet: arm64-osx
+            vcpkg_root: /usr/local/share/vcpkg
             osx_architecture: arm64
 
     steps:
       - *checkout-repository
 
       - &checkout-sdl
-        name: Checkout pinned SDL 3.4.12
+        name: Checkout pinned SDL 3.4.14
         if: runner.os == 'Linux'
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -137,7 +140,7 @@ jobs:
             libdecor-0-dev liburing-dev libusb-1.0-0-dev fonts-dejavu-core
 
       - &build-install-sdl
-        name: Build and install pinned SDL 3.4.12
+        name: Build and install pinned SDL 3.4.14
         if: runner.os == 'Linux'
         run: |
           cmake -G Ninja \
@@ -156,14 +159,6 @@ jobs:
             -DCMAKE_C_FLAGS="-g3 -fno-omit-frame-pointer"
           cmake --build "${{ runner.temp }}/sdl-build" --parallel
           cmake --install "${{ runner.temp }}/sdl-build"
-
-      - &setup-vcpkg
-        name: Setup vcpkg
-        if: runner.os != 'Linux'
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2
-        with:
-          vcpkgDirectory: '${{ runner.temp }}/vcpkg'
-          vcpkgGitCommitId: '${{ env.VCPKG_COMMIT_ID }}'
 
       - &install-vcpkg-sdl
         name: Install SDL3 with vcpkg
@@ -506,7 +501,6 @@ jobs:
       - *checkout-sdl
       - *install-linux-build-dependencies
       - *build-install-sdl
-      - *setup-vcpkg
       - *install-vcpkg-sdl
       - *configure-build
       - *build-project
