@@ -24,7 +24,7 @@ env:
 jobs:
   package-preflight:
     name: Repository package preflight
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
 
     steps:
@@ -77,12 +77,12 @@ jobs:
         include:
           - compiler: gcc
             name: Linux GCC
-            os: ubuntu-24.04
+            os: ubuntu-26.04
             c_compiler: gcc
             cxx_compiler: g++
           - compiler: clang
             name: Linux Clang
-            os: ubuntu-24.04
+            os: ubuntu-26.04
             c_compiler: clang
             cxx_compiler: clang++
           - compiler: msvc
@@ -269,7 +269,7 @@ jobs:
 
   imgui-test-engine:
     name: Linux Dear ImGui Test Engine
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       SDL_C_COMPILER: clang
@@ -307,7 +307,7 @@ jobs:
 
   sanitizer:
     name: Linux Clang ASan UBSan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer
@@ -357,7 +357,7 @@ jobs:
 
   nodes-performance:
     name: Linux nodes performance gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     env:
       SDL_C_COMPILER: gcc
@@ -392,7 +392,7 @@ jobs:
 
   abi-linux:
     name: Linux ABI surface
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       SDL_C_COMPILER: gcc
@@ -531,7 +531,7 @@ jobs:
       - sanitizer
       - nodes-performance
       - abi-linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
 
     steps:
