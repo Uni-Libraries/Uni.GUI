@@ -1,6 +1,7 @@
 #include "ui_dock_layout.h"
 
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_log.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -340,7 +341,15 @@ UiResult<void> UiDockLayoutManager::MaintainAfterFrame(const std::chrono::steady
     }
     if (m_dirty && m_persistence.enabled && !m_auto_save_suppressed &&
         now - m_dirty_since >= m_persistence.save_debounce) {
-        return SaveNow();
+        if (auto saved = SaveNow(); !saved) {
+            // Debounced auto-save is best effort: an unwritable settings location (read-only or full disk,
+            // removed directory) must not abort the frame loop. The layouts stay in memory, the next settings
+            // change retries, and SaveSettingsNow() and shutdown still report the failure to the caller.
+            m_dirty = false;
+            io.WantSaveIniSettings = false;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "UniGUI settings auto-save to '%s' failed: %s",
+                        m_persistence.path.c_str(), saved.error().message.c_str());
+        }
     }
     return {};
 }

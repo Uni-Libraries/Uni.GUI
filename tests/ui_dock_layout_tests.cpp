@@ -277,6 +277,41 @@ void TestPersistence(const std::filesystem::path& path) {
            "Oversized settings file must be rejected before parsing");
 }
 
+void TestAutoSaveFailureIsNotFatal(const std::filesystem::path& directory) {
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+    const auto path = directory / "missing" / "settings.bin";
+    auto manager = MakeManager(path);
+    Expect(manager.Load().has_value(), "Missing settings directory must load as empty settings");
+
+    // The first maintenance pass records the settings change; the second one is past the debounce period.
+    auto now = std::chrono::steady_clock::now();
+    const auto change_and_maintain = [&manager, &now]() {
+        ImGui::GetIO().WantSaveIniSettings = true;
+        now += std::chrono::hours{1};
+        const bool recorded = manager.MaintainAfterFrame(now).has_value();
+        now += std::chrono::hours{1};
+        return recorded && manager.MaintainAfterFrame(now).has_value();
+    };
+
+    Expect(change_and_maintain(), "A failed debounced auto-save must not fail the frame");
+    Expect(!manager.HasPendingWork(), "A failed auto-save must wait for the next settings change instead of spinning");
+    Expect(!ImGui::GetIO().WantSaveIniSettings, "A failed auto-save must consume the ImGui save request");
+    Expect(!std::filesystem::exists(path), "The failing auto-save must not have produced a settings file");
+
+    const auto explicit_save = manager.SaveNow(true);
+    Expect(!explicit_save && explicit_save.error().code == UiErrorCode::PersistenceSave,
+           "An explicit save must still report the write failure");
+
+    Expect(change_and_maintain() && !manager.HasPendingWork(),
+           "A later settings change must retry the auto-save without failing the frame");
+
+    std::filesystem::create_directories(path.parent_path());
+    Expect(change_and_maintain() && std::filesystem::exists(path),
+           "Auto-save must recover once the settings location becomes writable");
+    std::filesystem::remove_all(directory, ignored);
+}
+
 } // namespace
 
 int main() {
@@ -289,6 +324,7 @@ int main() {
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
          ".settings");
     TestPersistence(path);
+    TestAutoSaveFailureIsNotFatal(path.string() + ".dir");
 
     std::error_code ignored;
     std::filesystem::remove(path, ignored);

@@ -323,7 +323,7 @@ auto defined = app.DefineDockLayout(std::move(layout));
 auto activated = app.ActivateDockLayout("editing", Uni::GUI::UiDockApplyMode::RestoreOrBuild);
 ```
 
-The settings file uses a bounded, versioned binary envelope around Dear ImGui INI snapshots. Writes use a temporary file followed by atomic replacement. `SaveSettingsNow()` and `ReloadSettings()` are safe-point operations on the UI thread.
+The settings file uses a bounded, versioned binary envelope around Dear ImGui INI snapshots. Writes use a temporary file followed by atomic replacement. `SaveSettingsNow()` and `ReloadSettings()` are safe-point operations on the UI thread. Debounced auto-saves are best effort: a write failure is logged through SDL, does not fail `Tick()`, and is retried on the next settings change; `SaveSettingsNow()` and `Shutdown()` return the `PersistenceSave` error.
 
 ## Assets And Fonts
 
