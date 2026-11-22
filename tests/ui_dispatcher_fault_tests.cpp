@@ -2,8 +2,10 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -69,11 +71,13 @@ int main() {
     Expect(exit_request && !*exit_request && exit_request->error().code == UiErrorCode::WakeupFailed,
            "A saturated SDL queue must reject a wake before committing exit intent");
 
+    const auto bytes = std::make_shared<const std::vector<std::byte>>(1);
+    Expect(app.UpsertAsset({"queue-fault", bytes}).has_value(), "UI-thread asset insertion must succeed");
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     SDL_ClearError();
     const auto tick = app.Tick();
-    Expect(tick && !tick->exit_requested,
-           "Failed wake scheduling must not mutate dispatcher frame or exit state");
+    Expect(tick && tick->rendered && !tick->exit_requested,
+           "A successful local edit must redraw even when a worker wake failed");
     Expect(app.Shutdown().has_value(), "Queue-fault application must shut down");
     return EXIT_SUCCESS;
 }

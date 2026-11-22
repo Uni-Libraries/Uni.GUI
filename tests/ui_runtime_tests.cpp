@@ -275,6 +275,10 @@ int main() {
     one_more_config.frame_policy.idle = {UiLoopMode::WaitForEvent, 0.0};
     Expect(one_more_app.Initialize(std::move(one_more_config)).has_value(),
            "One-more-frame application must initialize");
+    const auto initial_frame = one_more_app.Tick();
+    const auto idle_frame = one_more_app.Tick();
+    Expect(initial_frame && initial_frame->rendered && idle_frame && !idle_frame->rendered,
+           "Wait-for-event app must be idle before the element is added");
     int one_more_updates = 0;
     Expect(one_more_app.AddElement(std::make_unique<OneMoreFrameElement>(one_more_updates)).has_value(),
            "One-more-frame element must register");

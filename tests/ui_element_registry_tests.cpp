@@ -60,6 +60,28 @@ public:
     }
 };
 
+class FailingMutator final : public Uni::GUI::UiElement {
+public:
+    FailingMutator(Uni::GUI::Detail::UiElementRegistry& registry, int& updates, bool throws)
+        : m_registry(registry), m_updates(updates), m_throws(throws) {}
+
+    Uni::GUI::UiResult<Uni::GUI::UiElementUpdate> Update(Uni::GUI::UiState& state) override {
+        Expect(m_registry.Remove(state.element_id), "Self-removal must be accepted");
+        Expect(!m_registry.Remove(state.element_id), "Deferred removal must only be accepted once");
+        Expect(m_registry.Add(std::make_unique<CountingElement>(m_updates, true)).has_value(),
+               "Replacement must be queued");
+        if (m_throws) {
+            throw std::runtime_error("expected failure after registry mutation");
+        }
+        return std::unexpected(Uni::GUI::UiError{Uni::GUI::UiErrorCode::InvalidArgument, "element failed"});
+    }
+
+private:
+    Uni::GUI::Detail::UiElementRegistry& m_registry;
+    int& m_updates;
+    bool m_throws;
+};
+
 class MutatingDestructorElement final : public Uni::GUI::UiElement {
 public:
     MutatingDestructorElement(Uni::GUI::Detail::UiElementRegistry& registry, int& child_updates)
@@ -129,5 +151,21 @@ int main() {
     Expect(registry.Update(app, 6, std::chrono::nanoseconds{16}).has_value() && destructor_child_updates == 1,
            "Destructor-added element must update on the following frame");
     registry.Clear();
+    for (const bool throws : {false, true}) {
+        int child = 0;
+        int later = 0;
+        Expect(registry.Add(std::make_unique<FailingMutator>(registry, child, throws)).has_value() &&
+                   registry.Add(std::make_unique<CountingElement>(later, true)).has_value(),
+               "Failure fixtures must register");
+        auto failure = registry.Update(app, 7, std::chrono::nanoseconds{});
+        Expect(!failure && failure.error().code == (throws ? Uni::GUI::UiErrorCode::FrameRendering :
+                                                             Uni::GUI::UiErrorCode::InvalidArgument),
+               "Iteration must preserve the element error or translate its exception");
+        Expect(later == 0 && child == 0 && registry.Size() == 2,
+               "Failed iteration must stop updating but finish removals and additions");
+        Expect(registry.Update(app, 8, std::chrono::nanoseconds{}).has_value() && later == 1 && child == 1,
+               "The replacement must participate in the very next iteration");
+        registry.Clear();
+    }
     return EXIT_SUCCESS;
 }

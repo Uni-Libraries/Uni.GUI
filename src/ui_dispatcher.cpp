@@ -300,18 +300,6 @@ bool ConsumeFrameRequest(const std::shared_ptr<UiDispatcherState>& state) {
     return std::exchange(state->frame_requested, false);
 }
 
-UiResult<void> RequestFrameWithoutWake(const std::shared_ptr<UiDispatcherState>& state) {
-    if (!state) {
-        return std::unexpected(UiError{UiErrorCode::QueueClosed, "Dispatcher is empty"});
-    }
-    std::lock_guard lock(state->mutex);
-    if (!state->open) {
-        return std::unexpected(UiError{UiErrorCode::QueueClosed, "Dispatcher is closed"});
-    }
-    state->frame_requested = true;
-    return {};
-}
-
 bool ConsumeExitRequest(const std::shared_ptr<UiDispatcherState>& state) {
     if (!state) {
         return false;

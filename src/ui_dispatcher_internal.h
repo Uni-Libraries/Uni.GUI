@@ -54,7 +54,6 @@ struct UiDispatcherState final {
     UiApp& app);
 
 [[nodiscard]] bool ConsumeFrameRequest(const std::shared_ptr<UiDispatcherState>& state);
-[[nodiscard]] UiResult<void> RequestFrameWithoutWake(const std::shared_ptr<UiDispatcherState>& state);
 [[nodiscard]] bool ConsumeExitRequest(const std::shared_ptr<UiDispatcherState>& state);
 [[nodiscard]] bool HasPendingCommands(const std::shared_ptr<UiDispatcherState>& state);
 [[nodiscard]] bool HasPendingDispatcherWork(const std::shared_ptr<UiDispatcherState>& state);

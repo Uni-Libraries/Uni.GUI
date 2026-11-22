@@ -139,6 +139,7 @@ struct UiApp::Impl final {
     Detail::UiAssetManager assets;
     std::shared_ptr<Detail::UiDispatcherState> dispatcher;
     bool frame_active{};
+    bool redraw_pending{}; // UI-thread changes do not need an SDL wake event.
     bool imgui_frame_active{};
     bool event_dispatch_active{};
     ImGuiContext* imgui_context{};
@@ -541,6 +542,7 @@ struct UiApp::Impl final {
         frame_active = false;
         imgui_frame_active = false;
         event_dispatch_active = false;
+        redraw_pending = false;
         frame_index = 0;
         previous_frame_demand = UiFrameDemand::None;
         initialized_at = {};
@@ -645,7 +647,8 @@ UiResult<UiTickResult> UiApp::Tick() {
     if (!drained) {
         return std::unexpected(std::move(drained.error()));
     }
-    const bool frame_requested = Detail::ConsumeFrameRequest(m_impl->dispatcher);
+    const bool ui_redraw = std::exchange(m_impl->redraw_pending, false);
+    const bool frame_requested = Detail::ConsumeFrameRequest(m_impl->dispatcher) || ui_redraw;
     if (*drained > 0 || frame_requested || *metrics_changed) {
         m_impl->last_activity = now;
     }
@@ -746,16 +749,14 @@ UiResult<UiTickResult> UiApp::Tick() {
         m_impl->last_activity = now;
     }
     if (m_impl->previous_frame_demand == UiFrameDemand::OneMoreFrame) {
-        if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
-            return std::unexpected(std::move(requested.error()));
-        }
+        m_impl->redraw_pending = true;
     } else if (m_impl->previous_frame_demand == UiFrameDemand::Continuous) {
         next_iteration = UiLoopRate{UiLoopMode::Continuous, 0.0};
     }
     if (auto maintained = m_impl->dock_layouts.MaintainAfterFrame(now); !maintained) {
         return std::unexpected(std::move(maintained.error()));
     }
-    if (Detail::HasPendingDispatcherWork(m_impl->dispatcher)) {
+    if (m_impl->redraw_pending || Detail::HasPendingDispatcherWork(m_impl->dispatcher)) {
         next_iteration = UiLoopRate{UiLoopMode::Continuous, 0.0};
     } else if (m_impl->dock_layouts.HasPendingWork() && next_iteration.mode == UiLoopMode::WaitForEvent) {
         next_iteration = UiLoopRate{UiLoopMode::RateLimited, 10.0};
@@ -842,8 +843,8 @@ UiResult<UiEventDispatchResult> UiApp::DispatchEvent(const SDL_Event& event) {
     if (action == UiEventAction::Exit) {
         m_impl->lifecycle = UiLifecycleState::ExitRequested;
         Detail::CloseDispatcher(m_impl->dispatcher);
-    } else if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
-        return std::unexpected(std::move(requested.error()));
+    } else {
+        m_impl->redraw_pending = true;
     }
     return UiEventDispatchResult{action != UiEventAction::Pass, action == UiEventAction::Exit};
 }
@@ -872,7 +873,9 @@ UiResult<UiElementId> UiApp::AddElement(std::unique_ptr<UiElement> element) {
     if (!IsMainThread()) {
         return std::unexpected(MakeError(UiErrorCode::WrongThread, "AddElement must run on the UI thread"));
     }
-    return m_impl->element_registry.Add(std::move(element));
+    auto added = m_impl->element_registry.Add(std::move(element));
+    if (added) m_impl->redraw_pending = true;
+    return added;
 }
 
 UiResult<bool> UiApp::RemoveElement(const UiElementId id) {
@@ -885,7 +888,9 @@ UiResult<bool> UiApp::RemoveElement(const UiElementId id) {
     if (id == InvalidUiElementId) {
         return std::unexpected(MakeError(UiErrorCode::InvalidArgument, "UiElement ID is invalid"));
     }
-    return m_impl->element_registry.Remove(id);
+    const bool removed = m_impl->element_registry.Remove(id);
+    if (removed) m_impl->redraw_pending = true;
+    return removed;
 }
 
 UiResult<UiTexture> UiApp::CreateTexture(const int width, const int height) {
@@ -1000,9 +1005,7 @@ UiResult<void> UiApp::SetUserScale(const float scale) {
     if (!refreshed) {
         return std::unexpected(std::move(refreshed.error()));
     }
-    if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
-        return std::unexpected(std::move(requested.error()));
-    }
+    m_impl->redraw_pending = true;
     return {};
 }
 
@@ -1018,9 +1021,7 @@ UiResult<void> UiApp::SetReferenceStyle(const ImGuiStyle& style) {
     m_impl->reference_style = style;
     m_impl->reference_style.FontSizeBase = m_impl->config.font.size;
     m_impl->ApplyDisplayScale();
-    if (auto requested = Detail::RequestFrameWithoutWake(m_impl->dispatcher); !requested) {
-        return std::unexpected(std::move(requested.error()));
-    }
+    m_impl->redraw_pending = true;
     return {};
 }
 
@@ -1052,9 +1053,7 @@ UiResult<void> UiApp::ActivateDockLayout(const std::string_view id, const UiDock
         return std::unexpected(MakeError(UiErrorCode::InvalidState, "UiApp is not ready"));
     }
     auto activated = m_impl->dock_layouts.Activate(id, mode);
-    if (activated) {
-        (void)Dispatcher().RequestFrame();
-    }
+    if (activated) m_impl->redraw_pending = true;
     return activated;
 }
 
@@ -1082,9 +1081,7 @@ UiResult<void> UiApp::ReloadSettings() {
     }
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
     auto reloaded = m_impl->dock_layouts.Reload();
-    if (reloaded) {
-        (void)Dispatcher().RequestFrame();
-    }
+    if (reloaded) m_impl->redraw_pending = true;
     return reloaded;
 }
 
@@ -1097,9 +1094,7 @@ UiResult<UiAssetInfo> UiApp::UpsertAsset(UiAssetSpec asset) {
     }
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
     auto upserted = m_impl->assets.Upsert(std::move(asset));
-    if (upserted) {
-        (void)Dispatcher().RequestFrame();
-    }
+    if (upserted) m_impl->redraw_pending = true;
     return upserted;
 }
 
@@ -1129,9 +1124,7 @@ UiResult<UiFontId> UiApp::CreateFont(UiFontSpec font) {
     }
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
     auto created = m_impl->assets.CreateFont(font);
-    if (created) {
-        (void)Dispatcher().RequestFrame();
-    }
+    if (created) m_impl->redraw_pending = true;
     return created;
 }
 
@@ -1143,7 +1136,9 @@ UiResult<void> UiApp::SetDefaultFont(const UiFontId id) {
         return std::unexpected(MakeError(UiErrorCode::InvalidState, "Fonts can only change at a frame safe point"));
     }
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
-    return m_impl->assets.SetDefaultFont(id);
+    auto selected = m_impl->assets.SetDefaultFont(id);
+    if (selected) m_impl->redraw_pending = true;
+    return selected;
 }
 
 UiResult<bool> UiApp::RemoveFont(const UiFontId id) {
@@ -1154,7 +1149,9 @@ UiResult<bool> UiApp::RemoveFont(const UiFontId id) {
         return std::unexpected(MakeError(UiErrorCode::InvalidState, "Fonts can only change at a frame safe point"));
     }
     ScopedUiContext context(m_impl->imgui_context, m_impl->implot_context);
-    return m_impl->assets.RemoveFont(id);
+    auto removed = m_impl->assets.RemoveFont(id);
+    if (removed && *removed) m_impl->redraw_pending = true;
+    return removed;
 }
 
 UiResult<ImFont*> UiApp::GetFont(const UiFontId id) const {

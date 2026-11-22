@@ -37,7 +37,7 @@ bool UiElementRegistry::Remove(const UiElementId id) {
         const auto iterator = std::find_if(entries.begin(), entries.end(), [id](const Entry& entry) {
             return entry.id == id;
         });
-        if (iterator == entries.end()) {
+        if (iterator == entries.end() || iterator->remove_requested) {
             return false;
         }
         iterator->remove_requested = true;
@@ -55,7 +55,7 @@ UiResult<UiFrameDemand> UiElementRegistry::Update(
     UiApp& app,
     const std::uint64_t frame_index,
     const std::chrono::nanoseconds delta_time) {
-    UiFrameDemand demand = UiFrameDemand::None;
+    UiResult<UiFrameDemand> demand = UiFrameDemand::None;
     m_updating = true;
     try {
         for (auto& entry : m_elements) {
@@ -63,27 +63,25 @@ UiResult<UiFrameDemand> UiElementRegistry::Update(
                 UiState state{app, entry.id, frame_index, delta_time};
                 auto updated = entry.element->Update(state);
                 if (!updated) {
-                    m_updating = false;
-                    return std::unexpected(std::move(updated.error()));
+                    demand = std::unexpected(std::move(updated.error()));
+                    break;
                 }
                 if (!updated->keep_alive) {
                     entry.remove_requested = true;
                 }
                 if (updated->frame_demand == UiFrameDemand::Continuous ||
-                    (updated->frame_demand == UiFrameDemand::OneMoreFrame && demand == UiFrameDemand::None)) {
-                    demand = updated->frame_demand;
+                    (updated->frame_demand == UiFrameDemand::OneMoreFrame && *demand == UiFrameDemand::None)) {
+                    *demand = updated->frame_demand;
                 }
             }
         }
     } catch (const std::exception& exception) {
-        m_updating = false;
-        return std::unexpected(UiError{
+        demand = std::unexpected(UiError{
             UiErrorCode::FrameRendering,
             std::string{"UiElement::Update threw an exception: "}.append(exception.what()),
         });
     } catch (...) {
-        m_updating = false;
-        return std::unexpected(UiError{UiErrorCode::FrameRendering, "UiElement::Update threw an unknown exception"});
+        demand = std::unexpected(UiError{UiErrorCode::FrameRendering, "UiElement::Update threw an unknown exception"});
     }
     m_updating = false;
     Commit();
@@ -110,9 +108,15 @@ std::size_t UiElementRegistry::Size() const noexcept {
 
 void UiElementRegistry::Commit() {
     while (true) {
+        const auto removed_count = static_cast<std::size_t>(std::ranges::count(m_elements, true, &Entry::remove_requested)) +
+                                   static_cast<std::size_t>(std::ranges::count(m_pending_elements, true, &Entry::remove_requested));
+        if (removed_count == 0 && m_pending_elements.empty()) {
+            return;
+        }
         std::vector<Entry> survivors;
         std::vector<Entry> removed;
-        survivors.reserve(m_elements.size() + m_pending_elements.size());
+        survivors.reserve(m_elements.size() + m_pending_elements.size() - removed_count);
+        removed.reserve(removed_count);
 
         const auto detach = [&survivors, &removed](std::vector<Entry>& entries) {
             for (auto& entry : entries) {
@@ -134,13 +138,6 @@ void UiElementRegistry::Commit() {
             m_updating = true;
             removed.clear();
             m_updating = false;
-        }
-
-        const bool has_removals = std::any_of(m_elements.begin(), m_elements.end(), [](const Entry& entry) {
-            return entry.remove_requested;
-        });
-        if (m_pending_elements.empty() && !has_removals) {
-            break;
         }
     }
 }
