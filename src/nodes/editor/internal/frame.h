@@ -129,6 +129,8 @@ private:
         const LinkRouterDescriptor& descriptor,
         const LinkRoutingContext& routing_context,
         std::size_t route_point_count);
+    [[nodiscard]] Result<LinkPath> RouteLink(const LinkRouterDescriptor& router,
+        const LinkRoutingContext& routing_context, bool* obstacle_aware = nullptr);
     [[nodiscard]] std::optional<NodeUiLayout> ResolveNodeLayout(
         const NodeInstance& node,
         Vec2 size,

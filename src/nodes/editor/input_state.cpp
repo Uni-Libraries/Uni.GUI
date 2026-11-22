@@ -67,6 +67,8 @@ void EditorFrame::UpdateInteraction() {
         };
         if (config.snap_to_grid && !ImGui::GetIO().KeyAlt) {
             resize->current = Snap(resize->current, config.snap_size);
+            resize->current.x = std::max(resize->current.x, config.minimum_group_size.x);
+            resize->current.y = std::max(resize->current.y, config.minimum_group_size.y);
         }
     } else if (std::holds_alternative<Panning>(session.interaction)) {
         session.pan.x += ImGui::GetIO().MouseDelta.x / ui_scale;
@@ -163,12 +165,11 @@ void EditorFrame::ProcessGestures() {
             PinId fixed = hovered_pin;
             const auto* pin = document.FindPin(graph_id, hovered_pin);
             if (pin != nullptr && pin->cardinality == PinCardinality::Single) {
-                for (const auto& [link_id, link] : graph->links) {
-                    if (link.output == hovered_pin || link.input == hovered_pin) {
-                        reconnect = link_id;
-                        fixed = link.output == hovered_pin ? link.input : link.output;
-                        break;
-                    }
+                const auto& incident = document.IncidentLinks(hovered_pin);
+                if (!incident.empty()) {
+                    reconnect = *incident.begin();
+                    const auto& link = graph->links.at(reconnect);
+                    fixed = link.output == hovered_pin ? link.input : link.output;
                 }
             }
             session.interaction = CreatingLink{fixed, mouse, mouse, reconnect, hovered_pin, false};

@@ -228,10 +228,7 @@ bool EditorFrame::RenderOverlays() {
                         .route_points = {},
                         .obstacles = cache.obstacles,
                     };
-                    auto preview = InvokeRouter(*router, routing_context, 0);
-                    if (!preview) {
-                        session.last_error = preview.error().message;
-                    } else {
+                    if (auto preview = RouteLink(*router, routing_context)) {
                         for (const auto& segment : preview->segments) {
                             std::visit(
                                 [&](const auto& primitive) {
@@ -264,10 +261,8 @@ bool EditorFrame::RenderOverlays() {
         } else {
             const auto* dragging = std::get_if<DraggingNodes>(&session.interaction);
             const bool had_group =
-                dragging != nullptr && std::ranges::any_of(presentation.Groups(), [&](const auto& entry) {
-                    return entry.second.graph == graph_id &&
-                           std::ranges::any_of(entry.second.members,
-                                               [&](const NodeId node) { return dragging->before.contains(node); });
+                dragging != nullptr && std::ranges::any_of(dragging->before, [&](const auto& entry) {
+                    return !presentation.GroupsForNode(entry.first).empty();
                 });
             if (had_group) hint = "Remove from group";
         }

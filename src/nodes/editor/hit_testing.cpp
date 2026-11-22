@@ -30,6 +30,7 @@ PinStyle EditorFrame::ResolvePinStyle(const PinInstance& pin, const bool hovered
             const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
             const std::uint64_t ui_identity = ui.Identity();
             const std::uint64_t ui_revision = ui.Revision();
+            const std::uint64_t editor_revision = session.external_revision;
             try {
                 resolved = callback(PinStyleContext{
                     .node = node->second,
@@ -52,7 +53,8 @@ PinStyle EditorFrame::ResolvePinStyle(const PinInstance& pin, const bool hovered
                 presentation_identity != presentation.Identity() ||
                 document_allocation != document.AllocationEpoch() ||
                 presentation_allocation != presentation.AllocationEpoch() ||
-                ui_identity != ui.Identity() || ui_revision != ui.Revision()) {
+                ui_identity != ui.Identity() || ui_revision != ui.Revision() ||
+                editor_revision != session.external_revision) {
                 ui_callback_invalidated = true;
                 session.last_error = "Pin style callbacks must not mutate editor state or their registry";
             }
@@ -82,22 +84,15 @@ bool EditorFrame::HitTest() {
     std::unordered_set<PinId, IdHash> hit_pins;
     std::unordered_set<GroupId, IdHash> hit_groups;
     std::unordered_set<RoutePointId, IdHash> hit_route_points;
-    std::unordered_set<LinkId, IdHash> hit_links;
     for (const auto& entry : hit_entries) {
         switch (entry.kind) {
         case Detail::SpatialKind::Node: hit_nodes.insert(NodeId{entry.id}); break;
         case Detail::SpatialKind::Pin: hit_pins.insert(PinId{entry.id}); break;
-        case Detail::SpatialKind::LinkSegment: hit_links.insert(LinkId{entry.id}); break;
+        case Detail::SpatialKind::LinkSegment: break; // Keep the primitive index for narrow-phase picking below.
         case Detail::SpatialKind::Group: hit_groups.insert(GroupId{entry.id}); break;
         case Detail::SpatialKind::RoutePoint: hit_route_points.insert(RoutePointId{entry.id}); break;
         }
     }
-    const GraphRect graph_hit_bounds = Detail::Expand(
-        GraphRect{graph_mouse, graph_mouse}, config.link_hit_radius / session.zoom);
-    for (const auto& [link_id, path] : overridden_link_paths) {
-        if (Detail::Overlaps(Detail::PathBounds(path), graph_hit_bounds)) hit_links.insert(link_id);
-    }
-
     for (auto node = node_geometry.rbegin();
          canvas_hovered && node != node_geometry.rend() && !hovered_pin;
          ++node) {
@@ -172,25 +167,27 @@ bool EditorFrame::HitTest() {
         float closest_link_distance = std::numeric_limits<float>::max();
         const float graph_hit_radius = config.link_hit_radius / session.zoom;
         const float graph_tolerance = config.link_flatten_tolerance / session.zoom;
-        for (const LinkId link_id : hit_links) {
-            const LinkPath* path = LinkPathFor(link_id);
-            if (path == nullptr) continue;
-            for (const auto& segment : path->segments) {
-                const auto flattened = Detail::FlattenPathSegmentAdaptive(segment, graph_tolerance);
-                if (flattened.size() > 1) session.metrics.adaptive_segments += flattened.size() - 1;
-                const float distance = Detail::DistanceToPathSegmentAdaptive(
-                    graph_mouse, segment, graph_tolerance, graph_hit_radius);
-                const bool closer = distance < closest_link_distance;
-                const bool deterministic_tie = distance == closest_link_distance &&
-                    (link_id.Value() < hovered_link.Value() ||
-                        (link_id == hovered_link &&
-                            segment.route_point_insert_index < hovered_link_segment));
-                if (distance <= graph_hit_radius && (closer || deterministic_tie)) {
-                    hovered_link = link_id;
-                    hovered_link_segment = segment.route_point_insert_index;
-                    closest_link_distance = distance;
-                }
+        const auto consider = [&](LinkId link_id, const LinkPathSegment& segment) {
+            const float distance = Detail::DistanceToPathSegmentAdaptive(
+                graph_mouse, segment, graph_tolerance, graph_hit_radius, &session.metrics.adaptive_segments);
+            const bool deterministic_tie = distance == closest_link_distance &&
+                (link_id < hovered_link || (link_id == hovered_link &&
+                    segment.route_point_insert_index < hovered_link_segment));
+            if (distance <= graph_hit_radius && (distance < closest_link_distance || deterministic_tie)) {
+                hovered_link = link_id;
+                hovered_link_segment = segment.route_point_insert_index;
+                closest_link_distance = distance;
             }
+        };
+        for (const auto& entry : hit_entries) {
+            if (entry.kind != Detail::SpatialKind::LinkSegment) continue;
+            const LinkId link{entry.id};
+            if (suppressed_links.contains(link) || overridden_link_paths.contains(link)) continue;
+            consider(link, cache.links.at(link).path.segments[entry.sub_index]);
+        }
+        // Transient paths need not have the same bounds or segment count as the cached path.
+        for (const auto& [link, path] : overridden_link_paths) {
+            for (const auto& segment : path.segments) consider(link, segment);
         }
     }
 

@@ -82,15 +82,18 @@ private:
     float epsilon = 1.0e-4f,
     float maximum_coordinate = 1.0e9f);
 
+inline constexpr std::size_t DefaultAdaptiveDepth = 12;
+
 [[nodiscard]] std::vector<Vec2> FlattenPathSegmentAdaptive(
     const LinkPathSegment& segment,
     float tolerance,
-    std::size_t max_depth = 12);
+    std::size_t max_depth = DefaultAdaptiveDepth);
 
 [[nodiscard]] float DistanceToPathSegmentAdaptive(
     Vec2 point,
     const LinkPathSegment& segment,
     float tolerance,
-    float maximum_distance);
+    float maximum_distance,
+    std::uint64_t* visited_lines = nullptr);
 
 } // namespace Uni::GUI::Nodes::Detail

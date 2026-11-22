@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief Immediate-mode graph editor, retained per-view state and callback contracts.
+
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/layout.h>
 #include <uni/gui/nodes/graph_asset.h>
@@ -25,6 +28,7 @@ enum class LinkFlowDirection : std::uint8_t {
     InputToOutput,
 };
 
+/// Combinable rendering diagnostics; enabling an overlay does not invalidate logical geometry.
 enum class EditorDebugOverlay : std::uint32_t {
     None = 0,
     NodeBounds = 1U << 0U,
@@ -64,6 +68,8 @@ constexpr EditorDebugOverlay& operator|=(
     return (static_cast<std::uint32_t>(overlays) & static_cast<std::uint32_t>(overlay)) != 0;
 }
 
+/// Packed ImGui colors and drawing dimensions. Pin radius scales with the graph; link width
+/// and route-point radius use reference UI units, independent of zoom.
 struct EditorStyle final {
     std::uint32_t background{0xFF181818U};
     std::uint32_t grid_minor{0x182F2F2FU};
@@ -105,6 +111,7 @@ struct EditorStyle final {
     float debug_pin_normal_length{24.0f};
 };
 
+/// Graph-unit header layout measured with the reference font. Supports one or two lines.
 struct NodeHeaderLayout final {
     std::uint8_t maximum_text_lines{1};
     float minimum_height{28.0f};
@@ -121,6 +128,7 @@ struct NodeHeaderLayout final {
     bool operator==(const NodeHeaderLayout&) const = default;
 };
 
+/// Per-frame settings. Geometry-affecting settings are cache keys; pan, zoom and debug overlays are not.
 struct EditorConfig final {
     float min_zoom{0.25f};
     float max_zoom{2.0f};
@@ -159,6 +167,7 @@ enum class ContextMenuTargetKind {
     RoutePoint,
 };
 
+/// Picked target and graph-space menu position. kind selects the relevant IDs.
 struct ContextMenuTarget final {
     ContextMenuTargetKind kind{ContextMenuTargetKind::Canvas};
     Vec2 position;
@@ -170,6 +179,7 @@ struct ContextMenuTarget final {
     std::size_t route_point_insert_index{0};
 };
 
+/// Borrowed for one menu callback. Draw menu items and Submit() owned commands instead of editing live state.
 class UNI_GUI_EXPORT EditorMenuContext final {
 public:
     EditorMenuContext(const EditorMenuContext&) = delete;
@@ -213,6 +223,7 @@ struct ResolvedGraphAsset final {
     GraphId root_graph;
 };
 
+/// Resolve asset metadata synchronously, without opening/replacing the editor's document in the callback.
 using GraphDocumentResolver = std::function<Result<ResolvedGraphAsset>(
     const GraphAssetId& asset,
     const GraphInterface& expected_interface)>;
@@ -238,6 +249,8 @@ struct NodeHeaderAction final {
     std::string action;
 };
 
+/// Frame outcome. Process external asset navigation and header actions after DrawEditor() returns.
+/// Request another frame while animation_active is true.
 struct EditorResult final {
     bool model_changed{false};
     bool presentation_changed{false};
@@ -257,6 +270,7 @@ struct Breadcrumb final {
     std::string label;
 };
 
+/// Cumulative work counters for this context, not frame timings. Use ResetMetrics() to measure an interval.
 struct EditorMetrics final {
     std::uint64_t geometry_rebuilds{0};
     std::uint64_t routed_links{0};
@@ -267,6 +281,8 @@ struct EditorMetrics final {
     std::uint64_t visible_link_segments{0};
 };
 
+/// UI-thread state for one view: navigation, selection, interaction, animation and geometry cache.
+/// Retain between calls to DrawEditor(); it neither owns nor serializes the document or presentation.
 class UNI_GUI_EXPORT EditorContext final {
 public:
     EditorContext();
@@ -277,31 +293,43 @@ public:
     EditorContext& operator=(const EditorContext&) = delete;
     void Swap(EditorContext& other) noexcept;
 
-    // Pan uses reference UI units; node and route geometry use graph units.
+    /// Set finite pan in reference UI units, not graph coordinates or physical pixels.
     void SetPan(Vec2 pan) noexcept;
     [[nodiscard]] Vec2 Pan() const noexcept;
+    /// Ignore nonpositive/nonfinite zoom. The next draw clamps it to the configured zoom limits.
     void SetZoom(float zoom) noexcept;
     [[nodiscard]] float Zoom() const noexcept;
 
     [[nodiscard]] GraphId ActiveGraph() const noexcept;
     [[nodiscard]] std::vector<Breadcrumb> Breadcrumbs() const;
+    /// Start a fresh breadcrumb path; a null graph selects the document root.
     [[nodiscard]] Result<void> ResetNavigation(const GraphDocument& document, GraphId graph = {});
+    /// Enter a local subgraph, saving the current graph's pan, zoom and selection.
     [[nodiscard]] Result<void> EnterSubgraph(const GraphDocument& document, NodeId node);
     [[nodiscard]] bool NavigateBack() noexcept;
     [[nodiscard]] bool NavigateToBreadcrumb(std::size_t index) noexcept;
 
     void ClearSelection() noexcept;
+    /// Replace selection, ignoring null IDs. A foreign graph clears selection; drawing prunes hidden or stale IDs.
     void SetSelection(GraphSelection selection);
+    /// Return an owning, deterministically ordered snapshot.
     [[nodiscard]] GraphSelection Selection() const;
 
+    /// Queue clipboard copy for processing in a subsequent editor frame.
     void CopySelection() noexcept;
+    /// Queue paste at a finite graph-space position.
     void PasteAt(Vec2 position) noexcept;
     void DuplicateSelection() noexcept;
+    /// Queue undoable alignment of the selected nodes (at least two required).
     void AlignSelection(NodeAlignment alignment) noexcept;
+    /// Queue undoable layout of selected nodes, or all non-hidden nodes when no nodes are selected.
     void AutoLayoutSelection(LayoutOptions options = {}) noexcept;
 
+    /// Request a zoom-limited fit of non-hidden geometry in the active graph, not just persisted nodes.
     void FrameAll() noexcept;
+    /// Fit selected geometry; a selected routed link includes its path, manual points and endpoint nodes.
     void FrameSelection() noexcept;
+    /// Start or restart a transient pulse on an existing link. Does not affect history or revisions.
     [[nodiscard]] Result<void> TriggerLinkFlow(
         const GraphDocument& document,
         GraphId graph,
@@ -309,6 +337,7 @@ public:
         LinkFlowDirection direction = LinkFlowDirection::OutputToInput);
     void ClearLinkFlow(const GraphDocument& document, GraphId graph, LinkId link) noexcept;
     void ClearLinkFlows() noexcept;
+    /// Request a rebuild after external layout/router inputs change without a revision change.
     void InvalidateGeometry() noexcept;
     void ResetMetrics() noexcept;
     [[nodiscard]] EditorMetrics Metrics() const noexcept;
@@ -321,6 +350,9 @@ private:
     friend struct Detail::EditorAccess;
 };
 
+/// Draw in an active ImGui frame/window on the UI thread. A zero size component uses available space
+/// on that axis; positive values are reference UI units. Drawing the same context is non-reentrant.
+/// Keep all inputs alive for the call; inspect EditorContext::LastError() for diagnostics.
 [[nodiscard]] UNI_GUI_EXPORT EditorResult DrawEditor(
     EditorContext& context,
     GraphDocument& document,

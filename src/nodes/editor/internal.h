@@ -161,6 +161,7 @@ struct GeometryCache final {
     std::unordered_map<LinkId, CachedLinkGeometry, IdHash> links;
     std::unordered_map<RoutePointId, CachedRoutePointGeometry, IdHash> route_points;
     std::vector<RoutingObstacle> obstacles;
+    std::vector<LinkId> obstacle_dependent_links;
     std::unordered_map<NodeId, std::size_t, IdHash> obstacle_indices;
     std::unordered_set<PinId, IdHash> connected_pins;
     Detail::SpatialIndex spatial;

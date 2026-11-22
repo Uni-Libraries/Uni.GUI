@@ -182,12 +182,8 @@ Result<NodeLayout> ComputeAutoLayout(
         return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Layout contains no nodes"));
     }
 
-    std::unordered_set<NodeId, IdHash> included(resolved->begin(), resolved->end());
+    const std::unordered_set<NodeId, IdHash> included(resolved->begin(), resolved->end());
     std::unordered_map<NodeId, std::vector<NodeId>, IdHash> outgoing;
-    std::unordered_map<NodeId, std::size_t, IdHash> level;
-    for (const NodeId node : *resolved) {
-        level.emplace(node, 0);
-    }
     for (const auto& [link_id, link] : graph->links) {
         (void)link_id;
         const auto output = graph->pins.find(link.output);
@@ -197,14 +193,12 @@ Result<NodeLayout> ComputeAutoLayout(
             output->second.node == input->second.node) {
             continue;
         }
-        auto& targets = outgoing[output->second.node];
-        if (std::ranges::find(targets, input->second.node) == targets.end()) {
-            targets.push_back(input->second.node);
-        }
+        outgoing[output->second.node].push_back(input->second.node);
     }
     for (auto& [node, targets] : outgoing) {
         (void)node;
         std::ranges::sort(targets, {}, &NodeId::Value);
+        targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
     }
 
     std::unordered_map<NodeId, std::vector<NodeId>, IdHash> incoming;
@@ -239,67 +233,56 @@ Result<NodeLayout> ComputeAutoLayout(
         }
     }
 
-    std::unordered_set<NodeId, IdHash> assigned;
-    std::vector<std::vector<NodeId>> components;
+    std::unordered_map<NodeId, std::size_t, IdHash> component_of;
+    std::size_t component_count = 0;
+    std::vector<NodeId> traversal;
     for (auto root = finish_order.rbegin(); root != finish_order.rend(); ++root) {
-        if (!assigned.insert(*root).second) continue;
-        std::vector<NodeId> component;
-        std::vector<NodeId> traversal{*root};
+        if (!component_of.emplace(*root, component_count).second) continue;
+        traversal.push_back(*root);
         while (!traversal.empty()) {
             const NodeId member = traversal.back();
             traversal.pop_back();
-            component.push_back(member);
-            for (auto source = incoming[member].rbegin(); source != incoming[member].rend(); ++source) {
-                if (assigned.insert(*source).second) traversal.push_back(*source);
+            for (const NodeId source : incoming[member]) {
+                if (component_of.emplace(source, component_count).second) traversal.push_back(source);
             }
         }
-        std::ranges::sort(component, {}, &NodeId::Value);
-        components.push_back(std::move(component));
+        ++component_count;
     }
 
-    std::unordered_map<NodeId, std::size_t, IdHash> component_of;
-    for (std::size_t component = 0; component < components.size(); ++component) {
-        for (const NodeId node : components[component]) component_of.emplace(node, component);
-    }
-    std::vector<std::vector<std::size_t>> component_edges(components.size());
-    std::vector<std::size_t> component_indegree(components.size(), 0);
-    std::vector<std::size_t> component_level(components.size(), 0);
+    std::vector<std::vector<std::size_t>> component_edges(component_count);
+    std::vector<std::size_t> component_indegree(component_count, 0);
+    std::vector<std::size_t> component_level(component_count, 0);
     for (const auto& [node, targets] : outgoing) {
         for (const NodeId target : targets) {
             const std::size_t source_component = component_of.at(node);
             const std::size_t target_component = component_of.at(target);
             if (source_component == target_component) continue;
-            auto& edges = component_edges[source_component];
-            if (std::ranges::find(edges, target_component) == edges.end()) {
-                edges.push_back(target_component);
-                ++component_indegree[target_component];
-            }
+            component_edges[source_component].push_back(target_component);
         }
     }
     std::vector<std::size_t> pending_components;
-    for (std::size_t component = 0; component < components.size(); ++component) {
+    for (auto& edges : component_edges) {
+        std::ranges::sort(edges);
+        edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+        for (const auto target : edges) ++component_indegree[target];
+    }
+    for (std::size_t component = 0; component < component_count; ++component) {
         if (component_indegree[component] == 0) pending_components.push_back(component);
     }
-    const auto component_order = [&](const std::size_t first, const std::size_t second) {
-        return components[first].front().Value() < components[second].front().Value();
-    };
-    std::ranges::sort(pending_components, component_order);
+    // Longest-path levels do not depend on the order of ready components.
     while (!pending_components.empty()) {
-        const std::size_t component = pending_components.front();
-        pending_components.erase(pending_components.begin());
+        const std::size_t component = pending_components.back();
+        pending_components.pop_back();
         for (const std::size_t target : component_edges[component]) {
             component_level[target] = std::max(component_level[target], component_level[component] + 1);
             if (--component_indegree[target] == 0) {
                 pending_components.push_back(target);
-                std::ranges::sort(pending_components, component_order);
             }
         }
     }
-    for (const NodeId node : *resolved) level[node] = component_level[component_of.at(node)];
-
     std::map<std::size_t, std::vector<NodeId>> layers;
     for (const NodeId node : *resolved) {
-        layers[level[node]].push_back(node);
+        layers[component_level[component_of.at(node)]].push_back(node);
     }
     float origin_x = std::numeric_limits<float>::max();
     float origin_y = std::numeric_limits<float>::max();
@@ -320,7 +303,6 @@ Result<NodeLayout> ComputeAutoLayout(
     float primary = options.direction == LayoutDirection::LeftToRight ? origin_x : origin_y;
     for (auto& [layer_index, nodes] : layers) {
         (void)layer_index;
-        std::ranges::sort(nodes, {}, &NodeId::Value);
         float secondary = options.direction == LayoutDirection::LeftToRight ? origin_y : origin_x;
         float primary_extent = 0.0f;
         for (const NodeId node : nodes) {

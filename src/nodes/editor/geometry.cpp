@@ -156,20 +156,21 @@ struct CubicSplit final {
         DistanceSquaredToLineSegment(cubic.p2, cubic.p0, cubic.p3) <= tolerance_squared;
 }
 
-void FlattenCubic(
+template<class Visit>
+void VisitCubicLines(
     const CubicPathSegment& cubic,
     const double tolerance_squared,
     const std::size_t depth,
     const std::size_t max_depth,
-    std::vector<Vec2>& output) {
+    const Visit& visit) {
     if (depth >= max_depth || FlatEnough(cubic, tolerance_squared)) {
-        output.push_back(cubic.p3);
+        visit(cubic.p0, cubic.p3);
         return;
     }
 
     const CubicSplit halves = Split(cubic);
-    FlattenCubic(halves.left, tolerance_squared, depth + 1, max_depth, output);
-    FlattenCubic(halves.right, tolerance_squared, depth + 1, max_depth, output);
+    VisitCubicLines(halves.left, tolerance_squared, depth + 1, max_depth, visit);
+    VisitCubicLines(halves.right, tolerance_squared, depth + 1, max_depth, visit);
 }
 
 [[nodiscard]] float ToFloatDistance(const double squared_distance) noexcept {
@@ -546,12 +547,12 @@ std::vector<Vec2> FlattenPathSegmentAdaptive(
     output.reserve(16);
     output.push_back(cubic.p0);
     const double double_tolerance = tolerance;
-    FlattenCubic(
+    VisitCubicLines(
         cubic,
         double_tolerance * double_tolerance,
         0,
         std::min(max_depth, MaximumAdaptiveDepth),
-        output);
+        [&](Vec2, Vec2 end) { output.push_back(end); });
     return output;
 }
 
@@ -559,7 +560,8 @@ float DistanceToPathSegmentAdaptive(
     const Vec2 point,
     const LinkPathSegment& segment,
     const float tolerance,
-    const float maximum_distance) {
+    const float maximum_distance,
+    std::uint64_t* visited_lines) {
     if (!Finite(point) || !FinitePrimitive(segment.primitive) ||
         std::isnan(maximum_distance) || maximum_distance < 0.0f) {
         return std::numeric_limits<float>::max();
@@ -570,19 +572,19 @@ float DistanceToPathSegmentAdaptive(
         return std::numeric_limits<float>::max();
     }
     if (const auto* line = std::get_if<LinePathSegment>(&segment.primitive)) {
+        if (visited_lines) ++*visited_lines;
         return ToFloatDistance(DistanceSquaredToLineSegment(point, line->start, line->end));
     }
 
-    const std::vector<Vec2> flattened = FlattenPathSegmentAdaptive(segment, tolerance);
-    if (flattened.size() < 2) {
+    if (!std::isfinite(tolerance) || tolerance <= 0.0f) {
         return std::numeric_limits<float>::max();
     }
     double minimum_squared = std::numeric_limits<double>::max();
-    for (std::size_t index = 1; index < flattened.size(); ++index) {
-        minimum_squared = std::min(
-            minimum_squared,
-            DistanceSquaredToLineSegment(point, flattened[index - 1], flattened[index]));
-    }
+    VisitCubicLines(std::get<CubicPathSegment>(segment.primitive),
+        static_cast<double>(tolerance) * tolerance, 0, DefaultAdaptiveDepth, [&](Vec2 start, Vec2 end) {
+            minimum_squared = std::min(minimum_squared, DistanceSquaredToLineSegment(point, start, end));
+            if (visited_lines) ++*visited_lines;
+        });
     return ToFloatDistance(minimum_squared);
 }
 

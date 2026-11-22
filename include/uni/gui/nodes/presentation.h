@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief Persistent visual state, route-point sequences and their derived indexes.
+
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/graph.h>
 
@@ -21,10 +24,13 @@ namespace Detail {
 struct GraphIoAccess;
 }
 
+/// Check retained geometry, ownership, memberships and indexes against the document without mutation.
+/// Missing node/link presentation entries are permitted; orphaned entries are not.
 [[nodiscard]] UNI_GUI_EXPORT Result<void> ValidateGraphPresentation(
     const GraphDocument& document,
     const GraphPresentation& presentation);
 
+/// Manual route anchor in graph coordinates. Its nonzero ID is unique across all links in a presentation.
 struct RoutePoint final {
     RoutePointId id;
     Vec2 position;
@@ -47,6 +53,8 @@ struct RoutePointStorageStatistics final {
     std::size_t mergeable_adjacent_pairs{0};
 };
 
+/// Ordered, chunked route snapshot. Copies and forward iterators retain an immutable generation.
+/// Prefer iteration for traversal: indexed access walks chunks, while Find() uses the ID index.
 class UNI_GUI_EXPORT PersistentRoutePointSequence final {
 private:
     struct Impl;
@@ -86,19 +94,25 @@ public:
 
     [[nodiscard]] bool empty() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
+    /// @throws std::out_of_range if the sequence is empty.
     [[nodiscard]] const RoutePoint& front() const;
+    /// @throws std::out_of_range if index is not less than size().
     [[nodiscard]] const RoutePoint& operator[](std::size_t index) const;
     [[nodiscard]] const RoutePoint* Find(RoutePointId point) const noexcept;
     [[nodiscard]] bool contains(RoutePointId point) const noexcept;
+    /// Cached validation of point IDs, uniqueness and finite coordinates.
     [[nodiscard]] bool Valid() const noexcept;
+    /// Audit contents, chunk occupancy, fingerprint and indexes. Not a constant-time check.
     [[nodiscard]] bool ValidateStructure() const noexcept;
     [[nodiscard]] RoutePointStorageStatistics StorageStatistics() const noexcept;
     [[nodiscard]] const_iterator begin() const noexcept;
     [[nodiscard]] const_iterator end() const noexcept;
     [[nodiscard]] bool SharesStorageWith(const PersistentRoutePointSequence& other) const noexcept;
     [[nodiscard]] std::vector<RoutePoint> ToVector() const;
+    /// Return IDs added to or removed from this sequence in other, ignoring moves/reordering.
     [[nodiscard]] RoutePointIdDelta DifferenceIds(
         const PersistentRoutePointSequence& other) const;
+    /// Return an updated snapshot, or an error for an unknown point or nonfinite position.
     [[nodiscard]] Result<PersistentRoutePointSequence> WithMovedPoint(
         RoutePointId point,
         Vec2 position) const;
@@ -114,6 +128,7 @@ private:
     friend class GraphPresentation;
 };
 
+/// Node origin and dimensions in graph units. Zero dimensions request automatic sizing per axis.
 struct NodePresentation final {
     Vec2 position;
     Vec2 size;
@@ -125,6 +140,7 @@ struct NodePresentation final {
     bool operator==(const NodePresentation&) const = default;
 };
 
+/// An empty router selects the editor default; an absent color selects the editor's link color.
 struct LinkStyle final {
     TypeId router;
     std::optional<std::uint32_t> color;
@@ -133,6 +149,7 @@ struct LinkStyle final {
     bool operator==(const LinkStyle&) const = default;
 };
 
+/// Immutable link style and ordered manual points with independently shared storage.
 class UNI_GUI_EXPORT LinkPresentation final {
 public:
     LinkPresentation();
@@ -159,6 +176,7 @@ enum class GroupKind {
     Comment,
 };
 
+/// Value-semantic, copy-on-write set of node IDs; mutations of a copy leave the original unchanged.
 class GroupMemberSet final {
 public:
     using Storage = CowAdjacencyMap<
@@ -231,6 +249,7 @@ struct GroupProtection final {
     bool operator==(const GroupProtection&) const = default;
 };
 
+/// Graph-scoped group or comment. Members must belong to graph; style must not be null.
 struct UNI_GUI_EXPORT GroupPresentation final {
     GroupId id;
     GraphId graph;
@@ -252,6 +271,8 @@ using GroupPresentationMap =
 using GroupAdjacencyRange =
     CowAdjacencyMap<GroupId, GroupId, Detail::CowCopyDomain::PresentationIndexes>;
 
+/// UI-thread owner of optional node/link state and groups. Mutate through transactions/commands.
+/// Find* pointers and map/index references are borrowed; reacquire them after changes or replacement.
 class UNI_GUI_EXPORT GraphPresentation final {
 public:
     GraphPresentation();
@@ -262,11 +283,17 @@ public:
     GraphPresentation& operator=(const GraphPresentation&) = delete;
     void Swap(GraphPresentation& other) noexcept;
 
+    /// Advances on a committed presentation change; allocating an ID alone does not advance it.
     [[nodiscard]] std::uint64_t PresentationRevision() const noexcept;
+    /// Subset of changes affecting cached geometry, not a measure of color/style edits in general.
     [[nodiscard]] std::uint64_t GeometryRevision() const noexcept;
+    /// Logical presentation identity; revisions alone cannot distinguish unrelated presentations.
     [[nodiscard]] std::uint64_t Identity() const noexcept;
+    /// Generation for detecting ID reservations not reflected in a presentation revision.
     [[nodiscard]] std::uint64_t AllocationEpoch() const noexcept;
+    /// Reserve a fresh ID without creating a group; returns a null ID on exhaustion.
     [[nodiscard]] GroupId AllocateGroupId() noexcept;
+    /// Reserve a fresh ID without inserting a point; returns a null ID on exhaustion.
     [[nodiscard]] RoutePointId AllocateRoutePointId() noexcept;
 
     [[nodiscard]] const NodePresentation* FindNode(NodeId node) const noexcept;
@@ -276,8 +303,11 @@ public:
     [[nodiscard]] const NodePresentationMap& Nodes() const noexcept;
     [[nodiscard]] const LinkPresentationMap& Links() const noexcept;
     [[nodiscard]] const GroupPresentationMap& Groups() const noexcept;
+    /// Indexed lookup; returns a null link when point is unknown.
     [[nodiscard]] LinkId RoutePointOwner(RoutePointId point) const noexcept;
+    /// Indexed memberships; an unknown or ungrouped node yields an empty range.
     [[nodiscard]] const GroupAdjacencyRange& GroupsForNode(NodeId node) const noexcept;
+    /// Indexed groups/comments in the graph, including collapsed groups.
     [[nodiscard]] const GroupAdjacencyRange& GroupsForGraph(GraphId graph) const noexcept;
 
 private:

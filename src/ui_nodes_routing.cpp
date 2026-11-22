@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <map>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <utility>
@@ -198,11 +199,11 @@ void AppendConnector(
 
     if (first_axis && last_axis && *first_axis == *last_axis) {
         if (*first_axis == Axis::Horizontal) {
-            const float middle_x = start.x + (end.x - start.x) * 0.5f;
+            const float middle_x = std::midpoint(start.x, end.x);
             AppendPoint(points, {middle_x, start.y});
             AppendPoint(points, {middle_x, end.y});
         } else {
-            const float middle_y = start.y + (end.y - start.y) * 0.5f;
+            const float middle_y = std::midpoint(start.y, end.y);
             AppendPoint(points, {start.x, middle_y});
             AppendPoint(points, {end.x, middle_y});
         }
@@ -245,8 +246,11 @@ void AppendConnector(
 
     LinkPath path;
     path.segments.reserve((anchors.size() - 1) * 4);
+    std::vector<Vec2> points;
+    points.reserve(6);
     for (std::size_t index = 0; index + 1 < anchors.size(); ++index) {
-        std::vector<Vec2> points{anchors[index]};
+        points.clear();
+        points.push_back(anchors[index]);
         if (index == 0) {
             AppendPoint(points, output_stub);
         }
@@ -271,6 +275,10 @@ void AppendConnector(
                 .route_point_insert_index = index,
             });
         }
+    }
+    // At large coincident endpoints even a 24-unit stub can round to the endpoint.
+    if (path.segments.empty()) {
+        path.segments.push_back({LinePathSegment{anchors.front(), anchors.back()}, 0});
     }
     return path;
 }

@@ -81,6 +81,13 @@ void TestAdaptiveLinkGeometry() {
     };
     const auto flat_points = FlattenPathSegmentAdaptive(flat, 0.25f);
     const auto curved_points = FlattenPathSegmentAdaptive(curved, 0.25f);
+    std::uint64_t tested_lines = 0;
+    Expect(DistanceToPathSegmentAdaptive({999.0f, 0.0f}, curved, 0.25f, 2.0f, &tested_lines) ==
+            std::numeric_limits<float>::max() && tested_lines == 0,
+        "Rejected bounds must not generate narrow-phase work");
+    Expect(DistanceToPathSegmentAdaptive({50.0f, 0.0f}, curved, 0.25f, 2.0f, &tested_lines) < 0.001f &&
+            tested_lines == curved_points.size() - 1,
+        "Cubic picking must visit each adaptive line exactly once");
     Expect(flat_points.size() == 2 && curved_points.size() > flat_points.size(),
         "Adaptive subdivision must avoid fixed tessellation and refine curved cubics");
     Expect(DistanceToPathSegmentAdaptive({50.0f, 0.0f}, flat, 0.25f, 2.0f) < 0.001f,
@@ -131,6 +138,13 @@ void TestBuiltInAndCustomRouters() {
             }), "Orthogonal routing must contain only axis-aligned line segments");
         }
     }
+
+    auto coincident = context;
+    coincident.output.position = coincident.input.position = Vec2{1.0e9f, 1.0e9f};
+    coincident.route_points = {};
+    const auto degenerate = routers.Find(OrthogonalLinkRouterType())->callback(coincident);
+    Expect(degenerate && ValidateLinkPath(*degenerate, coincident.output.position, coincident.input.position, 1),
+        "Coincident endpoints with sub-ULP orthogonal stubs still need a pickable primitive");
 
     const std::uint64_t before = routers.Revision();
     const TypeId custom{"test.router.step"};

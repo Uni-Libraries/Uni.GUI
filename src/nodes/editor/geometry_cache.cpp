@@ -23,6 +23,7 @@ Result<LinkPath> EditorFrame::InvokeRouter(
     const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
     const std::uint64_t router_identity = routers.Identity();
     const std::uint64_t router_revision = routers.Revision();
+    const std::uint64_t editor_revision = session.external_revision;
     Result<LinkPath> routed = std::unexpected(Error{ErrorCode::CommandFailed, "Link router failed"});
     try {
         routed = callback(routing_context);
@@ -38,7 +39,8 @@ Result<LinkPath> EditorFrame::InvokeRouter(
         document_identity != document.Identity() || presentation_identity != presentation.Identity() ||
         document_allocation != document.AllocationEpoch() ||
         presentation_allocation != presentation.AllocationEpoch() ||
-        router_identity != routers.Identity() || router_revision != routers.Revision()) {
+        router_identity != routers.Identity() || router_revision != routers.Revision() ||
+        editor_revision != session.external_revision) {
         router_callback_invalidated = true;
         return std::unexpected(Error{
             ErrorCode::RevisionConflict,
@@ -59,6 +61,25 @@ Result<LinkPath> EditorFrame::InvokeRouter(
         });
     }
     return routed;
+}
+
+Result<LinkPath> EditorFrame::RouteLink(const LinkRouterDescriptor& router,
+    const LinkRoutingContext& routing_context, bool* obstacle_aware) {
+    const bool is_fallback = router.type == BezierLinkRouterType();
+    if (obstacle_aware) *obstacle_aware = router.obstacle_aware;
+    ++session.metrics.routed_links;
+    auto path = InvokeRouter(router, routing_context, routing_context.route_points.size());
+    if (path) return path;
+    session.last_error = path.error().message;
+    if (!is_fallback && !router_callback_invalidated) {
+        if (const auto* fallback = routers.Find(BezierLinkRouterType())) {
+            if (obstacle_aware) *obstacle_aware |= fallback->obstacle_aware;
+            ++session.metrics.routed_links;
+            path = InvokeRouter(*fallback, routing_context, routing_context.route_points.size());
+            if (!path) session.last_error = path.error().message;
+        }
+    }
+    return path;
 }
 
 std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
@@ -121,6 +142,7 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
     const std::uint64_t presentation_allocation = presentation.AllocationEpoch();
     const std::uint64_t ui_identity = ui.Identity();
     const std::uint64_t ui_revision = ui.Revision();
+    const std::uint64_t editor_revision = session.external_revision;
     std::optional<Result<NodeUiLayout>> custom;
     try {
         custom.emplace(callback(NodeUiLayoutContext{
@@ -140,7 +162,8 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
         document_identity != document.Identity() || presentation_identity != presentation.Identity() ||
         document_allocation != document.AllocationEpoch() ||
         presentation_allocation != presentation.AllocationEpoch() ||
-        ui_identity != ui.Identity() || ui_revision != ui.Revision()) {
+        ui_identity != ui.Identity() || ui_revision != ui.Revision() ||
+        editor_revision != session.external_revision) {
         ui_callback_invalidated = true;
         session.last_error = "Node layout callbacks must not mutate editor state or their registry";
         return std::nullopt;
@@ -154,7 +177,8 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
     bool valid = (*custom)->pins.size() == node.pins.size();
     std::unordered_set<PinId, IdHash> seen;
     for (auto& placement : (*custom)->pins) {
-        const float length = std::hypot(placement.outward_normal.x, placement.outward_normal.y);
+        const double length = std::hypot(static_cast<double>(placement.outward_normal.x),
+            static_cast<double>(placement.outward_normal.y));
         const Vec2 absolute = origin + placement.position;
         const Vec2 label_anchor = absolute + placement.label.offset;
         valid = valid && graph->pins.contains(placement.pin) &&
@@ -175,7 +199,10 @@ std::optional<NodeUiLayout> EditorFrame::ResolveNodeLayout(
             });
         }
         if (length > 0.0001f && std::isfinite(length)) {
-            placement.outward_normal = placement.outward_normal * (1.0f / length);
+            placement.outward_normal = {
+                static_cast<float>(placement.outward_normal.x / length),
+                static_cast<float>(placement.outward_normal.y / length),
+            };
         }
     }
     if ((*custom)->body) {
@@ -238,9 +265,10 @@ bool EditorFrame::EnsureGeometryCache() {
     rebuilt.maximum_router_segments = config.maximum_router_segments;
     rebuilt.enable_node_collapse = config.enable_node_collapse;
 
-    for (const auto& [group_id, group_state] : presentation.Groups()) {
-        (void)group_id;
-        if (group_state.graph == graph_id && group_state.geometry.collapsed) {
+    for (const GroupId group_id : presentation.GroupsForGraph(graph_id)) {
+        rebuilt.ordered_groups.push_back(group_id);
+        const auto& group_state = presentation.Groups().at(group_id);
+        if (group_state.geometry.collapsed) {
             rebuilt.hidden_nodes.insert(group_state.members.begin(), group_state.members.end());
         }
     }
@@ -366,9 +394,6 @@ bool EditorFrame::EnsureGeometryCache() {
         rebuilt.nodes.emplace(node_id, std::move(geometry));
     }
 
-    for (const auto& [group_id, group_state] : presentation.Groups()) {
-        if (group_state.graph == graph_id) rebuilt.ordered_groups.push_back(group_id);
-    }
     std::ranges::sort(rebuilt.ordered_groups, [&](const GroupId first, const GroupId second) {
         const auto& a = presentation.Groups().at(first);
         const auto& b = presentation.Groups().at(second);
@@ -439,25 +464,11 @@ bool EditorFrame::EnsureGeometryCache() {
             .route_points = route_points,
             .obstacles = rebuilt.obstacles,
         };
-        const TypeId selected_router = router->type;
-        Result<LinkPath> routed = InvokeRouter(*router, routing_context, route_points.size());
-        ++session.metrics.routed_links;
-        if (router_callback_invalidated) {
-            session.last_error = routed.error().message;
-            return false;
-        }
-        if (!routed) {
-            session.last_error = routed.error().message;
-            const auto* fallback = routers.Find(BezierLinkRouterType());
-            if (fallback == nullptr || selected_router == BezierLinkRouterType()) continue;
-            routed = InvokeRouter(*fallback, routing_context, route_points.size());
-            ++session.metrics.routed_links;
-            if (router_callback_invalidated) {
-                session.last_error = routed.error().message;
-                return false;
-            }
-            if (!routed) continue;
-        }
+        bool obstacle_aware;
+        auto routed = RouteLink(*router, routing_context, &obstacle_aware);
+        if (router_callback_invalidated) return false;
+        if (!routed) continue;
+        if (obstacle_aware) rebuilt.obstacle_dependent_links.push_back(link_id);
         CachedLinkGeometry geometry{
             .id = link_id,
             .path = std::move(*routed),
@@ -468,6 +479,7 @@ bool EditorFrame::EnsureGeometryCache() {
         include_world(geometry.bounds);
         rebuilt.links.emplace(link_id, std::move(geometry));
         for (const RoutePoint& point : route_points) {
+            if (Bounded(point.position)) include_world({point.position, point.position});
             rebuilt.route_points.emplace(point.id, CachedRoutePointGeometry{link_id, point.id, point.position});
         }
     }
@@ -586,9 +598,9 @@ bool EditorFrame::BuildTransientGeometry() {
     }
 
     const GraphRect viewport = Detail::Normalize({ToGraph(canvas_origin), ToGraph(canvas_max)});
-    const float viewport_margin = std::max(
+    const float viewport_margin = std::max({
         std::max(64.0f, style.pin_radius) + 10.0f / session.zoom,
-        (style.link_width + 4.0f) / session.zoom);
+        (style.link_width + 4.0f) / session.zoom, (style.route_point_radius * 1.4f + 3.0f) / session.zoom});
     ++session.metrics.spatial_queries;
     const auto candidates = cache.spatial.Query(Detail::Expand(viewport, viewport_margin));
     session.metrics.spatial_candidates += candidates.size();
@@ -638,24 +650,16 @@ bool EditorFrame::BuildTransientGeometry() {
         reroute_links.insert(dragging->link);
     }
     if (!affected_nodes.empty()) {
-        for (const auto& [link_id, link] : graph->links) {
-            const auto output = graph->pins.find(link.output);
-            const auto input = graph->pins.find(link.input);
-            const bool incident =
-                (output != graph->pins.end() && affected_nodes.contains(output->second.node)) ||
-                (input != graph->pins.end() && affected_nodes.contains(input->second.node));
-            TypeId router_type = config.default_link_router;
-            if (const auto* state = presentation.FindLink(link_id);
-                state != nullptr && !state->Style().router.Empty()) {
-                router_type = state->Style().router;
+        reroute_links.insert(cache.obstacle_dependent_links.begin(), cache.obstacle_dependent_links.end());
+        for (const NodeId node : affected_nodes) {
+            if (const auto found = graph->nodes.find(node); found != graph->nodes.end()) {
+                for (const PinId pin : found->second.pins) {
+                    for (const LinkId link : document.IncidentLinks(pin)) {
+                        visible_links.insert(link);
+                        reroute_links.insert(link);
+                    }
+                }
             }
-            const auto* router = routers.Find(router_type);
-            const bool obstacle_dependent = router != nullptr && router->obstacle_aware;
-            if (incident) {
-                visible_links.insert(link_id);
-                reroute_links.insert(link_id);
-            }
-            if (obstacle_dependent) reroute_links.insert(link_id);
         }
     }
 
@@ -750,6 +754,15 @@ bool EditorFrame::BuildTransientGeometry() {
             node_geometry.push_back(std::move(geometry));
         }
     }
+    if (const auto* creating = std::get_if<CreatingLink>(&session.interaction);
+        creating && !pin_positions.contains(creating->origin)) {
+        // Reconnecting a visible pin keeps its opposite endpoint fixed, even offscreen.
+        if (const auto origin = CurrentPin(creating->origin)) {
+            pin_positions.emplace(creating->origin, ToScreen(origin->position));
+        } else {
+            session.interaction = Idle{};
+        }
+    }
     for (const GroupId group_id : cache.ordered_groups) {
         if (!visible_groups.contains(group_id)) continue;
         const auto& source = cache.groups.at(group_id);
@@ -829,16 +842,13 @@ bool EditorFrame::BuildTransientGeometry() {
             .route_points = route_points,
             .obstacles = cache.obstacles,
         };
-        auto routed = InvokeRouter(*router, routing_context, route_points.size());
-        ++session.metrics.routed_links;
+        auto routed = RouteLink(*router, routing_context);
         if (router_callback_invalidated) {
             for (const auto& [index, bounds] : restored_obstacles) cache.obstacles[index].bounds = bounds;
             dynamic_callback_invalidated = true;
-            session.last_error = routed.error().message;
             return false;
         }
         if (!routed) {
-            session.last_error = routed.error().message;
             suppressed_links.insert(link_id);
             continue;
         }
@@ -883,55 +893,40 @@ bool EditorFrame::ApplyViewportNavigation() {
     ImVec2 bounds_min{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
     ImVec2 bounds_max{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
     bool has_bounds = false;
-    std::unordered_set<NodeId, IdHash> framed_nodes = session.selected_nodes;
-    if (session.frame_selection) {
-        for (const auto link_id : session.selected_links) {
-            const auto link = graph->links.find(link_id);
-            if (link == graph->links.end()) continue;
-            if (const auto pin = graph->pins.find(link->second.output); pin != graph->pins.end()) {
-                framed_nodes.insert(pin->second.node);
-            }
-            if (const auto pin = graph->pins.find(link->second.input); pin != graph->pins.end()) {
-                framed_nodes.insert(pin->second.node);
-            }
-        }
-    }
-    const auto include_point = [&](const Vec2 point) {
-        bounds_min = Min(bounds_min, ImVec2{point.x, point.y});
-        bounds_max = Max(bounds_max, ImVec2{point.x, point.y});
+    const auto include = [&](const GraphRect bounds) {
+        bounds_min = Min(bounds_min, {bounds.min.x, bounds.min.y});
+        bounds_max = Max(bounds_max, {bounds.max.x, bounds.max.y});
         has_bounds = true;
     };
-    for (const auto& [node_id, geometry] : cache.nodes) {
-        if (session.frame_selection && !framed_nodes.contains(node_id)) continue;
-        include_point(geometry.spatial_bounds.min);
-        include_point(geometry.spatial_bounds.max);
-    }
-    for (const auto& [link_id, link_presentation] : presentation.Links()) {
-        const auto link = graph->links.find(link_id);
-        if (link == graph->links.end() || !cache.links.contains(link_id)) continue;
-        const bool has_selected_point = std::ranges::any_of(
-            link_presentation.Route(),
-            [&](const RoutePoint& point) { return session.selected_route_points.contains(point.id); });
-        if (session.frame_selection && !session.selected_links.contains(link_id) && !has_selected_point) continue;
-        for (const auto& point : link_presentation.Route()) {
-            if ((!session.frame_selection || session.selected_links.contains(link_id) ||
-                    session.selected_route_points.contains(point.id)) && Bounded(point.position)) {
-                include_point(point.position);
+    if (!session.frame_selection) {
+        if (cache.has_world_bounds) include(cache.world_bounds);
+    } else {
+        const auto include_node = [&](NodeId node) {
+            if (const auto it = cache.nodes.find(node); it != cache.nodes.end()) include(it->second.spatial_bounds);
+        };
+        for (const NodeId node : session.selected_nodes) include_node(node);
+        for (const LinkId link : session.selected_links) {
+            const auto* semantic = document.FindLink(graph_id, link);
+            if (semantic == nullptr) continue;
+            include_node(graph->pins.at(semantic->output).node);
+            include_node(graph->pins.at(semantic->input).node);
+            if (const auto it = cache.links.find(link); it != cache.links.end()) {
+                include(it->second.bounds);
+                if (const auto* state = presentation.FindLink(link)) {
+                    for (const RoutePoint& point : state->Route()) {
+                        if (Bounded(point.position)) include({point.position, point.position});
+                    }
+                }
             }
         }
-        if (!session.frame_selection || session.selected_links.contains(link_id)) {
-            include_point(cache.links.at(link_id).bounds.min);
-            include_point(cache.links.at(link_id).bounds.max);
+        for (const auto& [id, link] : session.selected_route_points) {
+            if (const auto it = cache.route_points.find(id); it != cache.route_points.end() &&
+                it->second.link == link && Bounded(it->second.position)) {
+                include({it->second.position, it->second.position});
+            }
         }
-    }
-    for (const auto& [group_id, group_state] : presentation.Groups()) {
-        if (session.frame_selection && !session.selected_groups.contains(group_id)) continue;
-        const auto& geometry = group_state.geometry;
-        if (group_state.graph == graph_id && Bounded(geometry.position) && Bounded(geometry.size) &&
-            geometry.size.x >= 0.0f && geometry.size.y >= 0.0f) {
-            include_point(geometry.position);
-            include_point(geometry.position +
-                (geometry.collapsed ? Vec2{geometry.size.x, 30.0f} : geometry.size));
+        for (const GroupId group : session.selected_groups) {
+            if (const auto it = cache.groups.find(group); it != cache.groups.end()) include(it->second.bounds);
         }
     }
     if (has_bounds) {

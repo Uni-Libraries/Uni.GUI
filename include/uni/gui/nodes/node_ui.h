@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief Extension contracts for node layout, widgets, headers and pin rendering.
+
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/commands.h>
 #include <uni/gui/nodes/routing.h>
@@ -21,6 +24,8 @@ struct ImDrawList;
 
 namespace Uni::GUI::Nodes {
 
+/// Callback-local view borrowing the document and node. Submit edits through the command sink;
+/// read-only contexts discard submissions and do not allocate dynamic pin IDs.
 class UNI_GUI_EXPORT NodeUiContext final {
 public:
     using CommandSink = std::function<void(std::unique_ptr<Command>)>;
@@ -39,11 +44,14 @@ public:
 
     [[nodiscard]] GraphId Graph() const noexcept;
     [[nodiscard]] const NodeInstance& Node() const noexcept;
+    /// Ordered copy including dynamic-pin edits queued earlier through this context.
     [[nodiscard]] std::vector<PinId> Pins() const;
+    /// Looks up only pins owned by Node(), including pending additions/updates. Removed pins return nullptr.
     [[nodiscard]] const PinInstance* FindPin(PinId pin) const noexcept;
     [[nodiscard]] float UiScale() const noexcept;
     [[nodiscard]] float Zoom() const noexcept;
     [[nodiscard]] float ScreenScale() const noexcept;
+    /// Available widget area in graph units; ToScreen() multiplies by UI scale and zoom once.
     [[nodiscard]] Vec2 AvailableSize() const noexcept;
     [[nodiscard]] bool ReadOnly() const noexcept;
     [[nodiscard]] float ToScreen(float logical_size) const noexcept;
@@ -52,8 +60,9 @@ public:
 
     void Submit(std::unique_ptr<Command> command);
     void SetProperty(PropertyPath path, std::optional<PropertyValue> value);
-    // Call immediately after an ImGui editing item to coalesce its active gesture.
+    /// Call immediately after an ImGui editing item to coalesce its active gesture.
     void EditProperty(PropertyPath path, PropertyValue value, bool changed);
+    /// Reserve a new ID and queue insertion (append by default); returns a null ID on rejection.
     [[nodiscard]] PinId AddDynamicPin(
         PinDescriptor descriptor,
         std::size_t index = std::numeric_limits<std::size_t>::max());
@@ -76,8 +85,9 @@ private:
     std::unordered_set<PinId, IdHash> m_removed_pins;
 };
 
-// Callbacks must balance their ImGui stacks and queue mutations through NodeUiContext.
+/// Draw widgets synchronously; balance ImGui stacks and queue mutations through NodeUiContext.
 using DrawNodeBodyFn = std::function<void(NodeUiContext&)>;
+/// Same command and ImGui-stack contract as DrawNodeBodyFn, but without canvas zoom.
 using DrawNodeInspectorFn = std::function<void(NodeUiContext&)>;
 
 struct NodeHeaderGlyph final {
@@ -116,6 +126,7 @@ struct NodeHeaderPresentation final {
     std::optional<std::uint32_t> color;
 };
 
+/// Pure per-visible-node callback returning owning data for this frame.
 using ResolveNodeHeaderFn = std::function<NodeHeaderPresentation(const NodeHeaderContext&)>;
 
 struct NodeHeaderGlyphDrawContext final {
@@ -127,6 +138,7 @@ struct NodeHeaderGlyphDrawContext final {
     bool enabled{true};
 };
 
+/// Append only draw primitives to the supplied draw list, inside the supplied screen rectangle.
 using DrawNodeHeaderGlyphFn = std::function<void(const NodeHeaderGlyphDrawContext&)>;
 
 struct NodeHeaderGlyphDescriptor final {
@@ -135,6 +147,7 @@ struct NodeHeaderGlyphDescriptor final {
     DrawNodeHeaderGlyphFn draw;
 };
 
+/// Offset from the pin in graph units and fractional alignment within the measured label (both axes 0..1 for pivot).
 struct PinLabelPlacement final {
     Vec2 offset;
     Vec2 pivot{0.5f, 0.5f};
@@ -148,6 +161,8 @@ struct PinPlacement final {
     PinLabelPlacement label;
 };
 
+/// Supply each owned pin once, with bounded node-local coordinates and a nonzero normal.
+/// An absent body uses the default widget area; a supplied body must have ordered corners.
 struct NodeUiLayout final {
     std::vector<PinPlacement> pins;
     std::optional<GraphRect> body; // Node-local graph coordinates.
@@ -162,6 +177,7 @@ struct NodeUiLayoutContext final {
     float pin_spacing{0.0f};
 };
 
+/// Pure, cacheable callback; do not mutate editor state or retain borrowed graph/node references.
 using LayoutNodeUiFn = std::function<Result<NodeUiLayout>(const NodeUiLayoutContext&)>;
 
 struct NodeUiDescriptor final {
@@ -194,8 +210,11 @@ struct PinStyleContext final {
     bool connected{false};
 };
 
+/// Pure styling callback evaluated as needed for the current frame, not part of persistent geometry.
 using PinStyleFn = std::function<PinStyle(const PinStyleContext&)>;
 
+/// UI-thread registry. Lookups borrow descriptors/callbacks until removal or replacement;
+/// registration rejects duplicate keys. LayoutRevision() excludes glyph and pin-style changes.
 class UNI_GUI_EXPORT NodeUiRegistry final {
 public:
     NodeUiRegistry();
@@ -231,6 +250,8 @@ struct NodeUiResult final {
     std::string error;
 };
 
+/// Invoke the node inspector in an active ImGui window and apply its queued commands as one history
+/// operation. A missing descriptor/inspector is a no-op; node, callback and command errors are reported.
 [[nodiscard]] UNI_GUI_EXPORT NodeUiResult DrawNodeInspector(
     const NodeUiRegistry& ui,
     GraphDocument& document,

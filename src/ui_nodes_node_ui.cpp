@@ -87,7 +87,8 @@ const PinInstance* NodeUiContext::FindPin(const PinId pin) const noexcept {
     if (shadow != m_shadow_pins.end()) {
         return &shadow->second;
     }
-    return m_document->FindPin(m_graph, pin);
+    const auto* value = m_document->FindPin(m_graph, pin);
+    return value != nullptr && value->node == m_node->id ? value : nullptr;
 }
 float NodeUiContext::UiScale() const noexcept { return m_ui_scale; }
 float NodeUiContext::Zoom() const noexcept { return m_zoom; }
@@ -222,7 +223,7 @@ void NodeUiContext::UpdateDynamicPin(PinInstance pin) {
     if (m_read_only) return;
     const auto* current = FindPin(pin.id);
     if (current == nullptr || current->storage != PinStorage::Dynamic ||
-        pin.storage != PinStorage::Dynamic) {
+        pin.storage != PinStorage::Dynamic || pin.node != m_node->id) {
         return;
     }
     m_shadow_pins.insert_or_assign(pin.id, pin);

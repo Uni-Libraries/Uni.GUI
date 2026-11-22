@@ -104,6 +104,8 @@ if (result.model_changed) {
 
 A zero size uses the available ImGui region. `EditorResult` reports semantic, presentation, selection, active-graph, external-asset navigation, and transient animation state. Rendering missing presentation entries uses deterministic fallback geometry without persisting normalization changes. Continue frames while `animation_active` is true after `EditorContext::TriggerLinkFlow()`. Code that calls `DrawEditor()` directly passes one `RegistryCatalog` plus the independent node-UI and router registries.
 
+`FrameAll()` queues a fit of the active graph, including routed paths even when a link has no presentation entry. `FrameSelection()` includes a selected link's endpoint nodes, path and manual points; selecting only a route point fits the point, not the entire link. Both respect zoom limits and exclude members hidden by collapsed groups. Framing changes the view, not the document or its history.
+
 ## Validate And Save
 
 Before consuming a graph in an application runtime, validate structure and registered node semantics:

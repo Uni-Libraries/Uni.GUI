@@ -64,7 +64,7 @@ A router returns ordered `LinePathSegment` and/or `CubicPathSegment` primitives.
 
 `route_point_insert_index` tells editor interaction where a newly inserted manual route point belongs when that path segment is targeted. It is not a segment ID and need not be unique.
 
-Router exceptions are contained and reported through `EditorContext::LastError()`. A failed custom router falls back to Bezier when possible. A callback must not mutate the document, presentation, allocate IDs, or register/unregister routers; such mutation is detected and fails closed with `RevisionConflict`.
+Router exceptions are contained and reported through `EditorContext::LastError()`. A failed custom router falls back to the registered Bezier descriptor when possible, on cache rebuilds, transient reroutes and connection previews alike. A callback must not mutate the document, presentation or editor context, allocate IDs, or register/unregister routers. A detected mutation aborts that draw without trying fallback or publishing a partial cache.
 
 ## Route Points
 
@@ -83,7 +83,7 @@ auto inserted = commands.Execute(
 
 Use `SetLinkRoutePointsCommand`, `InsertRoutePointCommand`, `MoveRoutePointCommand`, and `RemoveRoutePointsCommand` for undoable edits. The sequence stores at most `PersistentRoutePointSequence::ChunkCapacity` (256) points in each immutable chunk and maintains a sharded ID lookup. Moving one point path-copies one root/chunk path. Insert/remove update only affected chunks and route-point owner deltas; removal also coalesces adjacent chunks whose combined payload fits, without changing route-point IDs/order or the global owner index. `StorageStatistics()` reports occupancy and `ValidateStructure()` is the explicit internal-index oracle. `ReconnectLinkCommand(..., preserve_route)` controls whether reconnect retains route state.
 
-The built-in routers treat route points as ordered anchors. Custom routers may choose how to pass through them, but still must return a continuous endpoint-to-endpoint path and valid insertion indexes.
+The built-in routers treat route points as ordered anchors. Custom routers may choose how to pass through them, but still must return a continuous endpoint-to-endpoint path and valid insertion indexes. The editor frames both the actual path and the manual anchors, so a custom detour is not clipped just because it lies outside its endpoint nodes.
 
 ## Custom Pin Placement
 
@@ -102,7 +102,7 @@ Router endpoints are derived from `NodeUiLayout`. Each `PinPlacement` supplies a
 
 Value-only properties, rendering-only properties, colors, pin-style changes, pan, and zoom do not rebuild logical geometry. Geometry/topology properties, node movement/size, routes, UI layout registration, router registration, font/layout configuration, or `InvalidateGeometry()` do.
 
-During an active drag, incident links are rerouted transiently. If the selected router is `obstacle_aware`, moving any obstacle reroutes its links for that interaction. The persistent cache is rebuilt after committed geometry changes.
+During an active drag, the editor finds incident links through pin adjacency and reroutes them transiently. If a router is `obstacle_aware`, moving an obstacle also reroutes its cached links, even if neither endpoint moved. Obstacles include non-hidden offscreen nodes. Reconnecting a visible pin keeps the opposite endpoint fixed even when it is offscreen. The persistent cache is rebuilt after committed geometry changes.
 
 The spatial index culls drawing and hit-test candidates. Cubic picking uses adaptive subdivision controlled by `link_flatten_tolerance` rather than a fixed segment count. Cache counters are documented in [performance](performance.md).
 

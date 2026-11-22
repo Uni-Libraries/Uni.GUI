@@ -92,11 +92,13 @@ Fields are:
 - `routed_links`: router callback invocations, including fallback attempts.
 - `spatial_queries`: BVH/spatial index queries.
 - `spatial_candidates`: entries returned for filtering by those queries.
-- `adaptive_segments`: line pieces generated while adaptively flattening paths.
+- `adaptive_segments`: line pieces actually visited by narrow-phase link picking. A primitive rejected by its bounds contributes zero; a straight line tested for distance contributes one.
 - `visible_nodes`: nodes processed as visible.
 - `visible_link_segments`: link path segments processed as visible.
 
 A cold frame should rebuild geometry and route links. An unchanged warm frame should report zero rebuilds and zero routes. Pan and value/rendering-only properties preserve geometry; graph layout/topology revisions, presentation geometry, layout/router registry revisions, and explicit invalidation rebuild it. The full key is listed in [routing](routing.md#geometry-cache).
+
+Cached link picking uses the primitive indices returned by the BVH, not every primitive of every candidate link. A cubic's adaptive subdivision feeds the distance calculation and counter in a single traversal without allocating a polyline. Transient paths have separate geometry and are tested against their current bounds. `FrameAll()` reuses cached world bounds. Auto-layout deduplicates adjacency lists after sorting and processes ready components without re-sorting the frontier; node ordering within a layer remains by ID.
 
 Use metrics to assert behavior, not exact wall time. Counts can vary with viewport, interactions, fallback routers, and editor configuration.
 

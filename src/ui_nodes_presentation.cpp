@@ -473,10 +473,29 @@ Result<void> PersistentRoutePointSequence::Insert(const std::size_t index, Route
 
     std::vector<RoutePoint> points = source.points;
     points.insert(points.begin() + static_cast<std::ptrdiff_t>(local_index), point);
+    replacement->SetIndex(point.id, source.id, cloned);
+    if (points.size() > ChunkCapacity) {
+        // A midpoint split next to a sparse chunk could leave a mergeable pair.
+        // Move one boundary point instead; neither existing chunk shrinks.
+        const auto split = points.size() / 2;
+        const bool spill_left = chunk_index > 0 &&
+            m_impl->chunks[chunk_index - 1]->points.size() + split <= ChunkCapacity;
+        const bool spill_right = chunk_index + 1 < m_impl->chunks.size() &&
+            m_impl->chunks[chunk_index + 1]->points.size() + points.size() - split <= ChunkCapacity;
+        if (spill_left || spill_right) {
+            const auto& adjacent = *m_impl->chunks[spill_left ? chunk_index - 1 : chunk_index + 1];
+            Impl::RecordChunkClone(adjacent);
+            auto neighbor = std::make_shared<Impl::Chunk>(adjacent);
+            const auto boundary = spill_left ? points.begin() : std::prev(points.end());
+            neighbor->points.insert(spill_left ? neighbor->points.end() : neighbor->points.begin(), *boundary);
+            replacement->SetIndex(boundary->id, adjacent.id, cloned);
+            points.erase(boundary);
+            replacement->ReplaceChunk(adjacent.id, std::move(neighbor));
+        }
+    }
     if (points.size() <= ChunkCapacity) {
         auto chunk = std::make_shared<Impl::Chunk>(Impl::Chunk{source.id, std::move(points)});
         replacement->ReplaceChunk(source.id, std::move(chunk));
-        replacement->SetIndex(point.id, source.id, cloned);
     } else {
         if (replacement->next_chunk == 0 || replacement->next_chunk == std::numeric_limits<std::uint64_t>::max()) {
             return std::unexpected(Error{ErrorCode::GenerationOverflow, "Route chunk ID space is exhausted"});
@@ -499,7 +518,6 @@ Result<void> PersistentRoutePointSequence::Insert(const std::size_t index, Route
         replacement->chunks_by_id.insert(
             std::ranges::lower_bound(replacement->chunks_by_id, new_id, {}, &Impl::ChunkLookup::id),
             Impl::ChunkLookup{new_id, right});
-        replacement->SetIndex(point.id, local_index < split ? source.id : new_id, cloned);
         for (const RoutePoint& moved : right->points) replacement->SetIndex(moved.id, new_id, cloned);
     }
     ++replacement->size;

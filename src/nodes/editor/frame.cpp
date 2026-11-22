@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <variant>
 
 namespace Uni::GUI::Nodes::EditorDetail {
@@ -230,10 +231,8 @@ bool EditorFrame::ClearSelection() noexcept {
 bool EditorFrame::PruneSelection() {
     bool changed = false;
     const auto node_visible = [&](const NodeId node) {
-        return std::ranges::none_of(presentation.Groups(), [&](const auto& entry) {
-            const auto& group_state = entry.second;
-            return group_state.graph == graph_id && group_state.geometry.collapsed &&
-                group_state.members.contains(node);
+        return std::ranges::none_of(presentation.GroupsForNode(node), [&](const GroupId group) {
+            return presentation.Groups().at(group).geometry.collapsed;
         });
     };
     const auto link_visible = [&](const LinkId link_id) {
@@ -288,7 +287,7 @@ bool EditorFrame::PruneSelection() {
 }
 
 void EditorFrame::NormalizeNavigation() {
-    const auto breadcrumbs = context.Breadcrumbs();
+    const auto& breadcrumbs = session.navigation;
     std::size_t valid_breadcrumbs = breadcrumbs.empty() ? 0 : 1;
     for (std::size_t index = 1; index < breadcrumbs.size(); ++index) {
         const auto* parent_node = document.FindNode(breadcrumbs[index - 1].graph, breadcrumbs[index].via_node);
@@ -302,16 +301,14 @@ void EditorFrame::NormalizeNavigation() {
         valid_breadcrumbs = index + 1;
     }
     if (valid_breadcrumbs != breadcrumbs.size()) {
-        if (valid_breadcrumbs == 0) {
-            (void)context.ResetNavigation(document);
-        } else {
-            (void)context.NavigateToBreadcrumb(valid_breadcrumbs - 1);
-        }
-        result.active_graph_changed = true;
+        result.active_graph_changed |= context.NavigateToBreadcrumb(valid_breadcrumbs - 1);
     }
     if (document.FindGraph(context.ActiveGraph()) == nullptr) {
-        (void)context.ResetNavigation(document);
-        result.active_graph_changed = true;
+        if (auto reset = context.ResetNavigation(document); !reset) {
+            session.last_error = reset.error().message;
+        } else {
+            result.active_graph_changed = true;
+        }
     }
 }
 
@@ -358,23 +355,39 @@ void EditorFrame::ApplyNavigation() {
         ? std::get_if<GraphAssetTarget>(&node->subgraph->target)
         : nullptr;
     if (external != nullptr) {
-        if (!callbacks.resolve_graph_asset) {
+        const auto resolver = callbacks.resolve_graph_asset;
+        if (!resolver) {
             session.last_error = "No graph document resolver is configured for external assets";
-        } else if (auto resolved = callbacks.resolve_graph_asset(external->asset, external->interface); resolved) {
-            if (resolved->asset != external->asset || !resolved->root_graph || resolved->generation == 0) {
+            return;
+        }
+        // A resolver may call back into the host. Never read a borrowed node target after dispatch.
+        const GraphAssetTarget request = *external;
+        const auto doc_identity = document.Identity();
+        const auto revision = document.ModelRevision();
+        const auto editor_revision = session.external_revision;
+        try {
+            auto resolved = resolver(request.asset, request.interface);
+            if (document.Identity() != doc_identity || document.ModelRevision() != revision ||
+                session.external_revision != editor_revision) {
+                session.last_error = "Graph document resolver changed the active document or view";
+            } else if (!resolved) {
+                session.last_error = resolved.error().message;
+            } else if (resolved->asset != request.asset || !resolved->root_graph || resolved->generation == 0) {
                 session.last_error = "Graph document resolver returned an invalid asset location";
             } else {
                 result.open_graph_asset = GraphAssetNavigation{
-                    .asset = external->asset,
-                    .expected_interface = external->interface,
+                    .asset = request.asset,
+                    .expected_interface = request.interface,
                     .generation = resolved->generation,
                     .content_hash = resolved->content_hash,
                     .root_graph = resolved->root_graph,
                 };
                 session.last_error.clear();
             }
-        } else {
-            session.last_error = resolved.error().message;
+        } catch (const std::exception& exception) {
+            session.last_error = std::string{"Graph document resolver failed: "} + exception.what();
+        } catch (...) {
+            session.last_error = "Graph document resolver failed with an unknown exception";
         }
         return;
     }

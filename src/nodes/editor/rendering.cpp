@@ -437,7 +437,9 @@ void EditorFrame::RenderLinkFlows() {
         if (flow.document_identity != document.Identity() || flow.graph != graph_id) continue;
         const LinkPath* path = LinkPathFor(flow.link);
         if (path == nullptr) continue;
-        if (!Detail::Overlaps(Detail::PathBounds(*path), viewport)) continue;
+        const auto bounds = overridden_link_paths.contains(flow.link)
+            ? Detail::PathBounds(*path) : session.geometry.links.at(flow.link).bounds;
+        if (!Detail::Overlaps(bounds, viewport)) continue;
         const ArcPolyline flattened = FlattenLinkPathBounded(*path, config.link_flatten_tolerance, point_budget);
         if (flattened.points.size() < 2 || flattened.length <= 0.0f) continue;
 
