@@ -132,7 +132,7 @@ endif()
 
 file(READ "${SOURCE_DIR}/README.md" README_TEXT)
 string(FIND "${README_TEXT}"
-    "current version is `${UNIGUI_METADATA_VERSION}`, released on ${UNIGUI_METADATA_RELEASE_DATE}"
+    "source version is `${UNIGUI_METADATA_VERSION}` (${UNIGUI_METADATA_RELEASE_DATE})"
     readme_version_position)
 if(readme_version_position EQUAL -1)
     message(FATAL_ERROR

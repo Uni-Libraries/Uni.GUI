@@ -1,0 +1,13 @@
+{
+  "dependencies": [
+    { "name": "sdl3", "features": ["vulkan"] }
+  ],
+  "vcpkg-configuration": {
+    "default-registry": {
+      "kind": "git",
+      "repository": "https://github.com/microsoft/vcpkg",
+      "baseline": "eef0ef7bf4b2c0ddbf7be1a776f1bede94dfc861",
+      "reference": "eef0ef7bf4b2c0ddbf7be1a776f1bede94dfc861"
+    }
+  }
+}

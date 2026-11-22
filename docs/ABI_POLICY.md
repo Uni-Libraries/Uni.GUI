@@ -2,7 +2,7 @@
 
 ## Current Stability
 
-Release `4.0.0` establishes stable ABI major `4`. Within the supported compiler, standard-library, runtime, architecture, and build-mode family, later `4.x` releases preserve the public binary interfaces documented here. An incompatible public ABI change requires a new major release.
+Release `5.0.0` establishes ABI major `5` with updated public Dear ImGui and ImPlot types. Recompile applications and plugins built for `4.x`. Within the supported compiler, standard-library, runtime, architecture, and build-mode family, later `5.x` releases preserve the public binary interfaces documented here.
 
 ## Binary Boundary
 
@@ -26,7 +26,7 @@ Dear ImGui Test Engine is test-only. Its definitions and symbols are not linked 
 
 Incompatible ABI changes require a major version increment. Minor and patch releases preserve ABI within the same compiler/runtime family and may add backward-compatible APIs.
 
-The UniGUI, bundled Dear ImGui, and bundled ImPlot shared targets use the package major as their loader identity; for release `4.0.0`, SOVERSION is `4`. On ELF platforms, the core shared library ELF symbol version node is `UNIGUI_4` and remains unchanged throughout compatible `4.x` releases. Windows DLL and import-library names carry the same ABI major. The CMake package version uses `SameMajorVersion`: a newer `4.x` package can satisfy a `4.0` request, while a different major cannot.
+The UniGUI, bundled Dear ImGui, and bundled ImPlot shared targets use the package major as their loader identity; SOVERSION is `5`. On ELF platforms, the core shared library ELF symbol version node is `UNIGUI_5`. Windows DLL and import-library names carry the same ABI major. The CMake package version uses `SameMajorVersion`: a newer `5.x` package can satisfy a `5.0` request, while a different major cannot.
 
 Linux builds always test built and installed SONAMEs and the core ELF version node when shared libraries are enabled. The ABI lane captures ABIXML and exported-symbol manifests for all three DSOs. Once a release baseline exists, `UNIGUI_ENABLE_ABI_BASELINE_CHECK=ON` and `UNIGUI_ABI_BASELINE_DIR` make removal or incompatible mutation of that released surface a blocking test. Release artifacts contain provenance-attested baselines; no synthetic or unreviewed baseline is accepted as release evidence.
 
@@ -34,7 +34,7 @@ Nodes JSON persistence uses vendored nlohmann/json as a private header-only impl
 
 ## Thread Boundary
 
-`UiDispatcher` is the only public type designed for calls from worker threads. All other UniGUI operations are main-thread-only. This is a behavioral contract rather than an ABI compatibility guarantee.
+Workers may post through `UiDispatcher`, observe or wait on `UiCommandTicket`, and read an owning immutable `GraphDocumentSnapshot` captured on the UI thread. They must not operate on the live application, editor or mutable graph objects. See the [threading and callback contracts](nodes/threading_and_callbacks.md).
 
 Public `RegistrySnapshot` values are immutable owning views of one `RegistryCatalog` generation. `RegistryUpdate` applies atomic persistent-map changes, preserving generation and record identities for semantic no-ops. `ConversionRecipe` is a small owning handle to one exact immutable recipe, while `ConversionRegistrationToken` identifies a live registration in its catalog. Callback invocation leases and selective deferred-operation dependency records are private implementation details and are not application ABI. Their internal ownership keeps an active callback generation alive if its catalog is moved or destroyed.
 
@@ -47,7 +47,7 @@ SDL 3.4 or newer remains an external CMake package dependency. Exported targets 
 The supported binary consumption path is:
 
 ```cmake
-find_package(UniGUI 4.0 CONFIG REQUIRED)
+find_package(UniGUI 5.0 CONFIG REQUIRED)
 target_link_libraries(application PRIVATE UniGUI::UniGUI)
 ```
 

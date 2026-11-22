@@ -2,17 +2,17 @@
 
 Uni.GUI is a C++23 application shell for Dear ImGui and ImPlot.
 
-The current version is `4.0.0`, released on 2026-08-13. Release details are in the [changelog](CHANGELOG.md), and compatibility guarantees are in the [ABI policy](docs/ABI_POLICY.md).
+The source version is `5.0.0` (2026-11-22). Changes are in the [changelog](CHANGELOG.md), and compatibility guarantees are in the [ABI policy](docs/ABI_POLICY.md).
 
 ## Requirements
 
 - CMake 3.26 or newer
 - C++23 compiler and standard library with `std::expected`
 - SDL 3.4 or newer with a CMake package
-- Initialized Dear ImGui and ImPlot submodules
+- Initialized submodules: Dear ImGui `v1.93.0-docking` and ImPlot `v1.1`
 
 The CI matrix covers Linux with GCC and Clang, Windows with MSVC, and macOS on Intel and ARM64 with AppleClang. Debug, Release, shared, static, sanitizers, Dear ImGui Test Engine, installation, and an external package consumer are checked.
-Linux CI and release jobs build SDL 3.4.14 from a pinned commit; Windows and macOS use SDL from the runner-provided vcpkg, currently 3.4.14.
+CI and release jobs use SDL `3.4.20`: Linux builds the pinned upstream commit; Windows and macOS use the same release from a pinned vcpkg registry revision. The optional Dear ImGui Test Engine suite uses the matching `v1.93.0` commit.
 
 ## Build
 
@@ -28,6 +28,7 @@ Options:
 - `BUILD_SHARED_LIBS=ON|OFF`: shared or static UniGUI, ImGui, and ImPlot.
 - `UNIGUI_BUILD_DEMO=ON|OFF`: build the demo.
 - `UNIGUI_BUILD_TESTS=ON|OFF`: build unit and lifecycle tests.
+- `UNIGUI_BUILD_DOCS=ON|OFF`: enable the `unigui_docs` target (requires Doxygen 1.9.2 or newer).
 - `UNIGUI_BUILD_BENCHMARKS=ON|OFF`: build and register the Nodes performance regression benchmarks.
 - `UNIGUI_ENABLE_RUNTIME_TESTS=ON|OFF`: enable tests requiring a graphical display.
 - `UNIGUI_BUILD_TEST_ENGINE_TESTS=ON|OFF`: build the pinned Dear ImGui Test Engine suite; requires runtime tests.
@@ -37,7 +38,7 @@ Options:
 Runtime tests can be executed in a headless Linux environment:
 
 ```sh
-xvfb-run -a ctest --test-dir build --output-on-failure
+xvfb-run -a -s '-screen 0 1280x1024x24' ctest --test-dir build --output-on-failure
 ```
 
 Release archives can be generated with CPack:
@@ -46,6 +47,15 @@ Release archives can be generated with CPack:
 cpack --config build/CPackConfig.cmake -C Release -G TGZ
 cpack --config build/CPackSourceConfig.cmake -G TGZ
 ```
+
+Generate the public API reference and guides locally:
+
+```sh
+cmake -S . -B build -DUNIGUI_BUILD_DOCS=ON
+cmake --build build --target unigui_docs
+```
+
+Open `build/docs/html/index.html`. Generating the reference does not require a display.
 
 ## Installed Package
 
@@ -60,7 +70,7 @@ cmake --install build
 External project:
 
 ```cmake
-find_package(UniGUI 4.0 CONFIG REQUIRED)
+find_package(UniGUI 5.0 CONFIG REQUIRED)
 
 target_link_libraries(my_core PRIVATE UniGUI::UniGUI)
 target_link_libraries(my_callback_application PRIVATE UniGUI::Main)
@@ -223,6 +233,7 @@ The callback runner catches application exceptions before they cross the SDL C c
 auto id = app.AddElement(std::make_unique<MyWindow>());
 if (!id) {
     Report(id.error().message);
+    return;
 }
 
 auto removed = app.RemoveElement(*id);
@@ -244,6 +255,8 @@ MyWindow::Update(Uni::GUI::UiState&) {
 ```
 
 Adding or removing elements from inside `Update()` is safe. Mutations are committed after iteration, and newly added elements begin updating on the next frame. `UiElementId` remains stable until removal.
+
+Successful element changes request a redraw even in `WaitForEvent` mode. A UI-thread mutation is observed by the next tick without consuming a slot in SDL's event queue; workers still use `UiDispatcher` to wake the loop.
 
 ## Textures
 
@@ -272,7 +285,7 @@ Do not retain `ImTextureRef` after destroying its `UiTexture`.
 
 ## Dispatcher And Scheduling
 
-`UiDispatcher` is the only thread-safe UniGUI entry point. A worker can post a move-only command, request a frame, or request exit. Commands execute on the UI thread before `ImGui::NewFrame()` and commands posted by a command are deferred until the next tick.
+`UiDispatcher` is the thread-safe entry point for requesting work on the live UI. A worker can post a move-only command, request a frame, or request exit. Commands execute on the UI thread before `ImGui::NewFrame()` and commands posted by a command are deferred until the next tick.
 
 ```cpp
 Uni::GUI::UiDispatcher dispatcher = app.Dispatcher();
@@ -344,10 +357,10 @@ if (stored) {
 
 ## Threading
 
-Except for `UiDispatcher` operations and `UiCommandTicket` observation/waiting, all UniGUI operations are main-thread-only. This includes `UiApp`, `UiElement`, `UiTexture`, every `Uni::GUI::Nodes` object, Dear ImGui, and ImPlot. Use `UiDispatcher` from worker threads; checked cross-thread calls return `UiErrorCode::WrongThread` where applicable, while Nodes relies on the caller to honor the contract. An initialized `UiApp` must also be destroyed on its owning UI thread; violating this lifetime contract terminates rather than attempting unsafe cross-thread SDL/ImGui cleanup.
+Workers may use `UiDispatcher`, observe or wait on `UiCommandTicket`, and read an immutable `GraphDocumentSnapshot` captured on the UI thread. Live `UiApp`, `UiElement`, `UiTexture`, mutable Nodes objects, Dear ImGui and ImPlot are main-thread-only. Checked cross-thread calls return `UiErrorCode::WrongThread` where applicable; Nodes relies on the caller to honor the contract. Destroy an initialized `UiApp` on its owning UI thread: violating this lifetime contract terminates rather than attempting unsafe cross-thread SDL/ImGui cleanup.
 
 ## ABI Policy
 
 `UiApp`, `UiTexture`, and stateful Nodes classes use PIMPL. The shared library exports the public classes and functions marked by `UNI_GUI_EXPORT`, including the `Uni::GUI::Nodes` subsystem; internal renderer, SDL windowing, texture-store, and implementation types remain hidden and are not installed.
 
-Release `4.0.0` starts the stable ABI major `4`. Compatible `4.x` releases keep SOVERSION `4`, while incompatible ABI changes require a new major release. Shared-library consumers must still use the same C++ ABI family and the bundled ImGui/ImPlot package targets. The complete contract is in the [ABI policy](docs/ABI_POLICY.md).
+The package uses SOVERSION `5`. Rebuild applications and plugins from `4.x` against the new package, including its bundled ImGui/ImPlot targets. The complete contract is in the [ABI policy](docs/ABI_POLICY.md).

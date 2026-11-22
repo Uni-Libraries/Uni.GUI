@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 
-set(UNIGUI_VERSION "4.0.0")
-set(UNIGUI_RELEASE_DATE "2026-08-13")
+set(UNIGUI_VERSION "5.0.0")
+set(UNIGUI_RELEASE_DATE "2026-11-22")
 string(REGEX MATCH
     "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
     UNIGUI_VERSION_MATCH
@@ -25,6 +25,7 @@ option(UNIGUI_BUILD_TESTS "Build UniGUI tests" ${PROJECT_IS_TOP_LEVEL})
 option(UNIGUI_ENABLE_RUNTIME_TESTS "Enable tests that require a graphical display" OFF)
 option(UNIGUI_BUILD_TEST_ENGINE_TESTS "Build Dear ImGui Test Engine integration tests" OFF)
 option(UNIGUI_BUILD_BENCHMARKS "Build UniGUI performance regression benchmarks" OFF)
+option(UNIGUI_BUILD_DOCS "Enable the unigui_docs HTML API reference target" OFF)
 set(UNIGUI_NODES_STATE_MACHINE_TEST_STEPS "5000" CACHE STRING
     "Number of randomized state-machine steps per CTest seed")
 option(UNIGUI_INSTALL "Generate UniGUI install rules" ${PROJECT_IS_TOP_LEVEL})
@@ -62,7 +63,7 @@ if(UNIGUI_BUILD_TEST_ENGINE_TESTS)
     FetchContent_Declare(
         imgui_test_engine
         GIT_REPOSITORY https://github.com/ocornut/imgui_test_engine.git
-        GIT_TAG 508a8fc8dacac2f346d353fed31b9bc90ed29adc
+        GIT_TAG 16b6efbb393fdef0dcac9b0794a8ee476606a152 # v1.93.0; match the bundled ImGui
         GIT_SHALLOW FALSE
     )
     FetchContent_MakeAvailable(imgui_test_engine)
@@ -74,6 +75,25 @@ include(3rdparty/imgui.cmake)
 include(3rdparty/implot.cmake)
 
 add_subdirectory(src)
+
+if(UNIGUI_BUILD_DOCS)
+    find_package(Doxygen 1.9.2 REQUIRED COMPONENTS doxygen)
+    set(DOXYGEN_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/docs")
+    set(DOXYGEN_PROJECT_NUMBER "${PROJECT_VERSION}")
+    set(DOXYGEN_GENERATE_LATEX NO)
+    set(DOXYGEN_EXTRACT_ALL YES)
+    set(DOXYGEN_MACRO_EXPANSION YES)
+    set(DOXYGEN_EXPAND_ONLY_PREDEF YES)
+    set(DOXYGEN_EXPAND_AS_DEFINED UNI_GUI_NODE_COMMAND_DECLARATION)
+    set(DOXYGEN_PREDEFINED "UNI_GUI_EXPORT=")
+    set(DOXYGEN_STRIP_FROM_PATH "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}")
+    set(DOXYGEN_STRIP_FROM_INC_PATH "${PROJECT_SOURCE_DIR}/include")
+    set(DOXYGEN_QUIET YES)
+    set(DOXYGEN_WARN_AS_ERROR FAIL_ON_WARNINGS)
+    set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${PROJECT_SOURCE_DIR}/README.md")
+    doxygen_add_docs(unigui_docs include README.md CHANGELOG.md docs
+        COMMENT "Generate the UniGUI public API reference")
+endif()
 
 if(UNIGUI_BUILD_TESTS OR UNIGUI_BUILD_BENCHMARKS)
     enable_testing()
@@ -156,20 +176,16 @@ if(PROJECT_IS_TOP_LEVEL AND UNIGUI_INSTALL)
     set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
     set(CPACK_SOURCE_PACKAGE_FILE_NAME "UniGUI-${UNIGUI_VERSION}-Source")
     set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
-    set(CPACK_SOURCE_IGNORE_FILES
-        "/\\.git/"
-        "/\\.git$"
-        "/\\.github/"
-        "/build[^/]*/"
-        "/sdl-source/"
-        "/release-consumer/"
-        "/abi-baseline/"
-        "/release-abi/"
-        "/stage/"
-        "/\\.cache/"
-        "/\\.kilo/"
-        "/docs/audit\\.md$"
-        "~$"
-    )
+    # Package source inputs, not the workspace (which can contain arbitrary
+    # build trees, IDE settings and unrelated local files).
+    set(source_metadata "${PROJECT_BINARY_DIR}/source-metadata")
+    foreach(name IN ITEMS CMakeLists.txt CHANGELOG.md LICENSE README.md)
+        configure_file("${name}" "${source_metadata}/${name}" COPYONLY)
+    endforeach()
+    set(CPACK_SOURCE_INSTALLED_DIRECTORIES "${source_metadata};/")
+    foreach(dir IN ITEMS 3rdparty cmake docs include src src_demo tests)
+        list(APPEND CPACK_SOURCE_INSTALLED_DIRECTORIES "${PROJECT_SOURCE_DIR}/${dir}" "/${dir}")
+    endforeach()
+    set(CPACK_SOURCE_IGNORE_FILES "/[.]git(/|$)" "/[.]github/" "~$")
     include(CPack)
 endif()

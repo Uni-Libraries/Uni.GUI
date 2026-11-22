@@ -24,12 +24,11 @@ function(unigui_verify_document_anchor target_file anchor source_file)
     endif()
 endfunction()
 
-file(GLOB NODE_DOCUMENTS LIST_DIRECTORIES FALSE "${SOURCE_DIR}/docs/nodes/*.md")
+file(GLOB_RECURSE GUIDE_DOCUMENTS LIST_DIRECTORIES FALSE "${SOURCE_DIR}/docs/*.md")
 set(DOCUMENTS
     "${SOURCE_DIR}/README.md"
     "${SOURCE_DIR}/CHANGELOG.md"
-    "${SOURCE_DIR}/docs/ABI_POLICY.md"
-    ${NODE_DOCUMENTS}
+    ${GUIDE_DOCUMENTS}
 )
 
 set(VERIFIED_LINK_COUNT 0)

@@ -1,3 +1,36 @@
+if(UNIGUI_BUILD_BENCHMARKS)
+    add_executable(unigui_nodes_benchmarks
+        ui_nodes_benchmarks.cpp
+        ui_nodes_benchmark_support.cpp
+        ui_nodes_benchmark_editor.cpp
+        ui_nodes_benchmark_assets.cpp
+        ui_nodes_benchmark_io.cpp
+        ui_nodes_benchmark_mutations.cpp
+        ui_nodes_benchmark_registry.cpp
+    )
+    target_compile_features(unigui_nodes_benchmarks PRIVATE cxx_std_23)
+    target_link_libraries(unigui_nodes_benchmarks PRIVATE UniGUI::UniGUI)
+    if(WIN32)
+        target_link_libraries(unigui_nodes_benchmarks PRIVATE Psapi)
+    endif()
+    set_target_properties(unigui_nodes_benchmarks PROPERTIES CXX_EXTENSIONS OFF)
+    foreach(suite IN ITEMS frames-10k property-10k property-1m sparse-100k dense-links graph-assets io migrations mutations conversion-catalog)
+        add_test(
+            NAME unigui.nodes-performance.${suite}
+            COMMAND unigui_nodes_benchmarks --suite ${suite}
+        )
+        set_tests_properties(unigui.nodes-performance.${suite} PROPERTIES
+            LABELS "performance;nodes-performance;${suite}"
+            RUN_SERIAL TRUE
+            TIMEOUT 300
+        )
+    endforeach()
+endif()
+
+if(NOT UNIGUI_BUILD_TESTS)
+    return()
+endif()
+
 add_executable(unigui_texture_tests ui_texture_tests.cpp)
 target_compile_features(unigui_texture_tests PRIVATE cxx_std_23)
 target_include_directories(unigui_texture_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -168,23 +201,28 @@ if(UNIGUI_INSTALL)
     endfunction()
 
     set(unigui_current_version_file "${PROJECT_BINARY_DIR}/UniGUIConfigVersion.cmake")
+    math(EXPR previous_major "${PROJECT_VERSION_MAJOR} - 1")
+    math(EXPR next_major "${PROJECT_VERSION_MAJOR} + 1")
+    math(EXPR next_minor "${PROJECT_VERSION_MINOR} + 1")
+    math(EXPR next_patch "${PROJECT_VERSION_PATCH} + 1")
+    set(newer_patch "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${next_patch}")
     unigui_add_package_version_test(
-        unigui.package-version.minimum-4.0
-        "${unigui_current_version_file}" 4.0 "${UNIGUI_VERSION}" ON OFF)
+        unigui.package-version.minimum
+        "${unigui_current_version_file}" "${PROJECT_VERSION_MAJOR}.0" "${UNIGUI_VERSION}" ON OFF)
     unigui_add_package_version_test(
-        unigui.package-version.exact-4.0.0
-        "${unigui_current_version_file}" 4.0.0 "${UNIGUI_VERSION}" ON ON)
+        unigui.package-version.exact
+        "${unigui_current_version_file}" "${UNIGUI_VERSION}" "${UNIGUI_VERSION}" ON ON)
     unigui_add_package_version_test(
-        unigui.package-version.reject-newer-4.0.1
-        "${unigui_current_version_file}" 4.0.1 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-newer
+        "${unigui_current_version_file}" "${newer_patch}" "${UNIGUI_VERSION}" OFF OFF)
     unigui_add_package_version_test(
-        unigui.package-version.reject-major-3
-        "${unigui_current_version_file}" 3.0.0 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-previous-major
+        "${unigui_current_version_file}" "${previous_major}.0.0" "${UNIGUI_VERSION}" OFF OFF)
     unigui_add_package_version_test(
-        unigui.package-version.reject-major-5
-        "${unigui_current_version_file}" 5.0.0 "${UNIGUI_VERSION}" OFF OFF)
+        unigui.package-version.reject-next-major
+        "${unigui_current_version_file}" "${next_major}.0.0" "${UNIGUI_VERSION}" OFF OFF)
 
-    foreach(synthetic_version IN ITEMS 4.0.1 4.1.0 5.0.0)
+    foreach(synthetic_version IN ITEMS "${newer_patch}" "${PROJECT_VERSION_MAJOR}.${next_minor}.0" "${next_major}.0.0")
         set(synthetic_version_file
             "${CMAKE_CURRENT_BINARY_DIR}/UniGUIConfigVersion-${synthetic_version}.cmake")
         write_basic_package_version_file(
@@ -192,14 +230,14 @@ if(UNIGUI_INSTALL)
             VERSION "${synthetic_version}"
             COMPATIBILITY SameMajorVersion
         )
-        if(synthetic_version MATCHES "^4\\.")
+        if(synthetic_version VERSION_LESS "${next_major}.0.0")
             set(expect_compatible ON)
         else()
             set(expect_compatible OFF)
         endif()
         unigui_add_package_version_test(
             "unigui.package-version.synthetic-${synthetic_version}"
-            "${synthetic_version_file}" 4.0.0 "${synthetic_version}"
+            "${synthetic_version_file}" "${UNIGUI_VERSION}" "${synthetic_version}"
             "${expect_compatible}" OFF)
     endforeach()
 endif()
@@ -239,35 +277,6 @@ if(UNIGUI_ENABLE_ABI_BASELINE_CHECK)
                 -P "${PROJECT_SOURCE_DIR}/cmake/VerifyAbiBaseline.cmake"
         )
         set_tests_properties("unigui.abi-baseline.${abi_name}" PROPERTIES LABELS abi)
-    endforeach()
-endif()
-
-if(UNIGUI_BUILD_BENCHMARKS)
-    add_executable(unigui_nodes_benchmarks
-        ui_nodes_benchmarks.cpp
-        ui_nodes_benchmark_support.cpp
-        ui_nodes_benchmark_editor.cpp
-        ui_nodes_benchmark_assets.cpp
-        ui_nodes_benchmark_io.cpp
-        ui_nodes_benchmark_mutations.cpp
-        ui_nodes_benchmark_registry.cpp
-    )
-    target_compile_features(unigui_nodes_benchmarks PRIVATE cxx_std_23)
-    target_link_libraries(unigui_nodes_benchmarks PRIVATE UniGUI::UniGUI)
-    if(WIN32)
-        target_link_libraries(unigui_nodes_benchmarks PRIVATE Psapi)
-    endif()
-    set_target_properties(unigui_nodes_benchmarks PROPERTIES CXX_EXTENSIONS OFF)
-    foreach(suite IN ITEMS frames-10k property-10k property-1m sparse-100k dense-links graph-assets io migrations mutations conversion-catalog)
-        add_test(
-            NAME unigui.nodes-performance.${suite}
-            COMMAND unigui_nodes_benchmarks --suite ${suite}
-        )
-        set_tests_properties(unigui.nodes-performance.${suite} PROPERTIES
-            LABELS "performance;nodes-performance;${suite}"
-            RUN_SERIAL TRUE
-            TIMEOUT 300
-        )
     endforeach()
 endif()
 
@@ -342,81 +351,24 @@ if(UNIGUI_BUILD_TEST_ENGINE_TESTS)
     set(test_engine_root "${imgui_test_engine_SOURCE_DIR}")
     set(test_engine_dir "${test_engine_root}/imgui_test_engine")
 
+    # The engine requires instrumented objects rather than the shipped DSOs.
+    # Take the translation units from those targets so the two builds cannot drift.
+    foreach(library IN ITEMS unigui unigui_imgui unigui_implot)
+        get_target_property(sources ${library} SOURCES)
+        get_target_property(source_dir ${library} SOURCE_DIR)
+        list(FILTER sources INCLUDE REGEX "[.]cpp$")
+        foreach(source IN LISTS sources)
+            cmake_path(ABSOLUTE_PATH source BASE_DIRECTORY "${source_dir}")
+            list(APPEND instrumented_sources "${source}")
+        endforeach()
+    endforeach()
+
     add_executable(unigui_imgui_test_engine_tests
         ui_test_engine_main.cpp
         ui_test_engine_cases.cpp
         ui_test_engine_nodes.cpp
 
-        "${PROJECT_SOURCE_DIR}/src/ui_app.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_asset_manager.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_dispatcher.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_dock_layout.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_element_registry.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_font.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_scale.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/clipboard.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/command_stack.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/graph.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/group.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/hierarchy.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/link.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/node.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/pin.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/protection.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction_commit.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction_journal.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction_presentation.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction_protection.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/commands/transaction_semantic.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/clipboard.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/context_menu.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/editor.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/editor_context.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/frame.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/frame_helpers.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/geometry.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/geometry_cache.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/hit_testing.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/input_state.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/minimap.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/navigation.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/rendering.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/rendering_overlays.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/selection.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/shortcuts.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_graph.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_graph_validation.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_graph_asset.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_io.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_json.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_layout.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_node_ui.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_policy.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_presentation.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_property.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_registry.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_routing.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_nodes_snapshot.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_texture.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_winsys_sdl.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_renderer_sdl.cpp"
-        "${PROJECT_SOURCE_DIR}/src/ui_renderer_sdlgpu.cpp"
-
-        "${imgui_dir}/imgui.cpp"
-        "${imgui_dir}/imgui_demo.cpp"
-        "${imgui_dir}/imgui_draw.cpp"
-        "${imgui_dir}/imgui_tables.cpp"
-        "${imgui_dir}/imgui_widgets.cpp"
-        "${imgui_dir}/misc/cpp/imgui_stdlib.cpp"
-        "${imgui_dir}/backends/imgui_impl_sdl3.cpp"
-        "${imgui_dir}/backends/imgui_impl_sdlrenderer3.cpp"
-        "${imgui_dir}/backends/imgui_impl_sdlgpu3.cpp"
-
-        "${implot_dir}/implot.cpp"
-        "${implot_dir}/implot_demo.cpp"
-        "${implot_dir}/implot_items.cpp"
-
+        ${instrumented_sources}
         "${test_engine_dir}/imgui_capture_tool.cpp"
         "${test_engine_dir}/imgui_te_context.cpp"
         "${test_engine_dir}/imgui_te_coroutine.cpp"
@@ -428,25 +380,8 @@ if(UNIGUI_BUILD_TEST_ENGINE_TESTS)
     )
 
     target_compile_features(unigui_imgui_test_engine_tests PRIVATE cxx_std_23)
-    set_source_files_properties(
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/clipboard.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/context_menu.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/editor.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/editor_context.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/frame.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/frame_helpers.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/geometry.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/geometry_cache.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/hit_testing.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/input_state.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/minimap.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/navigation.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/rendering.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/rendering_overlays.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/selection.cpp"
-        "${PROJECT_SOURCE_DIR}/src/nodes/editor/shortcuts.cpp"
-        PROPERTIES COMPILE_DEFINITIONS IMGUI_DEFINE_MATH_OPERATORS
-    )
+    set_source_files_properties(${instrumented_sources} PROPERTIES
+        COMPILE_DEFINITIONS IMGUI_DEFINE_MATH_OPERATORS)
     target_compile_definitions(unigui_imgui_test_engine_tests PRIVATE
         UNI_GUI_STATIC_DEFINE
         UNIGUI_TEST_ENGINE_TEST_BUILD
