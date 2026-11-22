@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 #include <span>
 #include <unordered_set>
 #include <utility>
@@ -74,11 +73,12 @@ UiResult<void> UiDockLayoutManager::Configure(
     UiDockingConfig docking,
     UiPersistenceConfig persistence) {
     Reset();
-    if (docking.enabled && docking.dockspace_id.empty()) {
-        return std::unexpected(UiError{UiErrorCode::LayoutInvalid, "Dockspace ID must not be empty"});
+    if (docking.enabled && (docking.dockspace_id.empty() || docking.dockspace_id.contains('\0') ||
+                            ImHashStr(docking.dockspace_id.c_str()) == 0)) {
+        return std::unexpected(UiError{UiErrorCode::LayoutInvalid, "Dockspace ID is invalid"});
     }
-    if (persistence.enabled && persistence.path.empty()) {
-        return std::unexpected(UiError{UiErrorCode::InvalidArgument, "Persistence path must not be empty"});
+    if (persistence.enabled && (persistence.path.empty() || persistence.path.contains('\0'))) {
+        return std::unexpected(UiError{UiErrorCode::InvalidArgument, "Persistence path is empty or contains a NUL"});
     }
     if (persistence.save_debounce.count() < 0 ||
         std::chrono::duration<long double>{persistence.save_debounce} >=
@@ -130,6 +130,7 @@ UiResult<bool> UiDockLayoutManager::Remove(const std::string_view id) {
     m_saved_ini.erase(std::string{id});
     if (m_active == id) {
         m_active.clear();
+        m_active_applied = false;
         m_build_pending = false;
     }
     if (m_pending_activation && m_pending_activation->id == id) {
@@ -155,7 +156,7 @@ UiResult<void> UiDockLayoutManager::Activate(const std::string_view id, const Ui
 }
 
 std::string UiDockLayoutManager::Active() const {
-    return m_active;
+    return m_active_applied ? m_active : std::string{};
 }
 
 UiResult<void> UiDockLayoutManager::Load() {
@@ -219,8 +220,10 @@ UiResult<void> UiDockLayoutManager::Load() {
 
     m_saved_ini = std::move(loaded);
     if (!active.empty() && m_layouts.contains(active)) {
-        m_active.clear();
         m_pending_activation = PendingActivation{active, UiDockApplyMode::RestoreOrBuild};
+        m_active = std::move(active);
+        m_active_applied = false;
+        m_build_pending = false;
     }
     m_auto_save_suppressed = false;
     return {};
@@ -235,23 +238,26 @@ UiResult<void> UiDockLayoutManager::SaveNow(const bool explicit_overwrite) {
     }
     CaptureActive();
 
-    if (m_saved_ini.size() > 1024 ||
-        m_active.size() > std::numeric_limits<std::uint32_t>::max()) {
+    constexpr auto header_size = SettingsMagic.size() + 3 * sizeof(std::uint32_t);
+    if (m_saved_ini.size() > 1024 || m_active.size() > MaxSettingsBytes - header_size) {
         return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Settings metadata exceeds the format limit"});
     }
+    std::size_t serialized_size = header_size + m_active.size();
     std::vector<std::pair<std::string_view, std::string_view>> records;
     records.reserve(m_saved_ini.size());
     for (const auto& [id, ini] : m_saved_ini) {
-        if (id.size() > std::numeric_limits<std::uint32_t>::max() ||
-            ini.size() > std::numeric_limits<std::uint32_t>::max()) {
+        constexpr auto lengths = 2 * sizeof(std::uint32_t);
+        const auto remaining = MaxSettingsBytes - serialized_size;
+        if (lengths > remaining || id.size() > remaining - lengths || ini.size() > remaining - lengths - id.size()) {
             return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Settings record exceeds the format limit"});
         }
+        serialized_size += lengths + id.size() + ini.size();
         records.emplace_back(id, ini);
     }
     std::ranges::sort(records, {}, &std::pair<std::string_view, std::string_view>::first);
 
     std::vector<char> output;
-    output.reserve(1024);
+    output.reserve(serialized_size);
     output.insert(output.end(), SettingsMagic.begin(), SettingsMagic.end());
     AppendU32(output, SettingsVersion);
     AppendString(output, m_active);
@@ -260,25 +266,18 @@ UiResult<void> UiDockLayoutManager::SaveNow(const bool explicit_overwrite) {
         AppendString(output, id);
         AppendString(output, ini);
     }
-    if (output.size() > MaxSettingsBytes) {
-        return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Serialized settings exceed the size limit"});
+    const auto temporary = m_persistence.path + ".tmp." +
+                           std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    std::ofstream stream(temporary, std::ios::binary | std::ios::noreplace);
+    if (!stream) {
+        return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Failed to create temporary settings file"});
     }
-
-    const std::string temporary = m_persistence.path + ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream || !stream.write(output.data(), static_cast<std::streamsize>(output.size()))) {
-            return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Failed to write temporary settings file"});
-        }
-        stream.flush();
-        if (!stream) {
-            return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Failed to flush temporary settings file"});
-        }
-    }
-    if (!SDL_RenamePath(temporary.c_str(), m_persistence.path.c_str())) {
+    stream.write(output.data(), static_cast<std::streamsize>(output.size()));
+    stream.close();
+    if (!stream || !SDL_RenamePath(temporary.c_str(), m_persistence.path.c_str())) {
         std::error_code remove_error;
         std::filesystem::remove(temporary, remove_error);
-        return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Failed to atomically replace settings file"});
+        return std::unexpected(UiError{UiErrorCode::PersistenceSave, "Failed to write or replace settings file"});
     }
 
     m_dirty = false;
@@ -309,6 +308,7 @@ UiResult<void> UiDockLayoutManager::PrepareBeforeFrame() {
         m_build_pending = true;
     }
     m_active = activation.id;
+    m_active_applied = true;
     m_dirty = true;
     m_dirty_since = std::chrono::steady_clock::now();
     return {};
@@ -366,6 +366,7 @@ void UiDockLayoutManager::Reset() noexcept {
     m_layouts.clear();
     m_saved_ini.clear();
     m_active.clear();
+    m_active_applied = false;
     m_pending_activation.reset();
     m_build_pending = false;
     m_dirty = false;
@@ -398,12 +399,12 @@ UiResult<void> UiDockLayoutManager::Validate(const UiDockLayout& layout) {
         all_names.insert(split.side_leaf);
         all_names.insert(split.remainder_leaf);
     }
-    std::unordered_set<std::string> windows;
+    std::unordered_set<ImGuiID> windows;
     for (const auto& placement : layout.placements) {
-        if (placement.window_name.empty() ||
+        if (placement.window_name.empty() || placement.window_name.contains('\0') ||
             !leaves.contains(placement.leaf) ||
-            !windows.insert(placement.window_name).second) {
-            return std::unexpected(UiError{UiErrorCode::LayoutInvalid, "Docking placement references an invalid leaf"});
+            !windows.insert(ImHashStr(placement.window_name.c_str())).second) {
+            return std::unexpected(UiError{UiErrorCode::LayoutInvalid, "Docking placement has an invalid window or leaf"});
         }
     }
     return {};
@@ -447,7 +448,7 @@ UiResult<void> UiDockLayoutManager::ApplyDefinition(const UiDockLayout& layout) 
 }
 
 void UiDockLayoutManager::CaptureActive() {
-    if (m_active.empty() || ImGui::GetCurrentContext() == nullptr) {
+    if (!m_active_applied || ImGui::GetCurrentContext() == nullptr) {
         return;
     }
     std::size_t size = 0;

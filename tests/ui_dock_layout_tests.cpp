@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -165,6 +166,14 @@ void TestValidation() {
     duplicate_window.placements.back().window_name = duplicate_window.placements.front().window_name;
     Expect(!manager.Define(std::move(duplicate_window)), "A window may only be placed once");
 
+    auto same_imgui_window = ValidLayout("same-window-id");
+    same_imgui_window.placements.front().window_name = "English###inspector";
+    same_imgui_window.placements.back().window_name = "Localized###inspector";
+    Expect(!manager.Define(std::move(same_imgui_window)), "Different labels for one ImGui ID must not be placed twice");
+    auto nul_name = ValidLayout("nul-name");
+    nul_name.placements.front().window_name.push_back('\0');
+    Expect(!manager.Define(std::move(nul_name)), "ImGui window names must not be silently truncated");
+
     Expect(!manager.Activate("valid", static_cast<UiDockApplyMode>(999)),
            "Invalid layout apply mode must be rejected");
     Expect(!manager.Activate("missing", UiDockApplyMode::RestoreOrBuild),
@@ -190,6 +199,8 @@ void TestValidation() {
     UiDockingConfig empty_dockspace;
     empty_dockspace.dockspace_id.clear();
     Expect(!invalid_config.Configure(empty_dockspace, persistence), "Enabled docking requires a dockspace ID");
+    empty_dockspace.dockspace_id.assign(1, '\0');
+    Expect(!invalid_config.Configure(empty_dockspace, persistence), "Dockspace IDs must not contain a NUL");
 
     UiDockLayoutManager disabled_docking_manager;
     UiDockingConfig disabled_docking;
@@ -212,6 +223,9 @@ void TestValidation() {
     empty_path.path.clear();
     docking.enabled = false;
     Expect(!invalid_config.Configure(docking, empty_path), "Enabled persistence requires a path");
+    empty_path.path = "settings";
+    empty_path.path.push_back('\0');
+    Expect(!invalid_config.Configure(docking, empty_path), "A path containing a NUL must not be passed to file APIs");
 
     UiPersistenceConfig negative_debounce;
     negative_debounce.enabled = true;
@@ -221,6 +235,9 @@ void TestValidation() {
 }
 
 void TestPersistence(const std::filesystem::path& path) {
+    const auto sibling_count = [&path] {
+        return std::distance(std::filesystem::directory_iterator{path.parent_path()}, std::filesystem::directory_iterator{});
+    };
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
     auto missing = MakeManager(path);
@@ -267,7 +284,35 @@ void TestPersistence(const std::filesystem::path& path) {
     Expect(manager.SaveNow(true).has_value(), "Last-known-good settings must remain saveable after failed reload");
     const auto sorted = MakeSettings("", {{"a-layout", "a-data"}, {"z-layout", "z-data"}});
     Expect(ReadBytes(path) == sorted, "Settings records must survive failed reload and serialize deterministically");
-    Expect(!std::filesystem::exists(path.string() + ".tmp"), "Atomic save must not leave a temporary file");
+    Expect(sibling_count() == 1, "Atomic save must leave only the destination file");
+
+    const auto sibling = path.string() + ".tmp";
+    const std::vector<char> marker{'o', 't', 'h', 'e', 'r'};
+    WriteBytes(sibling, marker);
+    Expect(manager.SaveNow(true).has_value() && ReadBytes(sibling) == marker && ReadBytes(path) == sorted,
+           "An existing sibling file must not be used as scratch storage");
+
+    const auto occupied = path.parent_path() / "occupied";
+    Expect(std::filesystem::create_directory(occupied), "Rename failure fixture must be created");
+    const auto failed_replace = MakeManager(occupied).SaveNow(true);
+    Expect(!failed_replace && failed_replace.error().code == UiErrorCode::PersistenceSave &&
+               std::filesystem::is_directory(occupied) && sibling_count() == 3,
+           "Failed replacement must preserve the destination and clean up its temporary file");
+
+    UiDockLayoutManager restoring;
+    UiDockingConfig docking;
+    docking.layouts.push_back(ValidLayout());
+    UiPersistenceConfig persistence;
+    persistence.path = path.string();
+    const auto selected = MakeSettings("valid", {{"valid", "[Window][Inspector]\nPos=1,2\n\n"}});
+    WriteBytes(path, selected);
+    Expect(restoring.Configure(std::move(docking), persistence).has_value() && restoring.Load().has_value(),
+           "Defined layout selection must load");
+    Expect(restoring.Active().empty() && restoring.HasPendingWork(), "Restoration must remain deferred");
+    Expect(restoring.SaveNow().has_value() && ReadBytes(path) == selected,
+           "Saving before first frame must preserve the selection and its uncaptured snapshot");
+    Expect(restoring.PrepareBeforeFrame().has_value() && restoring.Active() == "valid",
+           "Early save must leave the selection pending for the next frame");
 
     std::vector<char> oversized(16U * 1024U * 1024U + 1U, '\0');
     WriteBytes(path, oversized);
@@ -319,16 +364,16 @@ int main() {
     ImGui::GetIO().IniFilename = nullptr;
 
     TestValidation();
-    const auto path = std::filesystem::temp_directory_path() /
+    const auto directory = std::filesystem::temp_directory_path() /
         ("unigui-layout-unit-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
-         ".settings");
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    Expect(std::filesystem::create_directory(directory), "Persistence tests require a private scratch directory");
+    const auto path = directory / "app.settings";
     TestPersistence(path);
     TestAutoSaveFailureIsNotFatal(path.string() + ".dir");
 
     std::error_code ignored;
-    std::filesystem::remove(path, ignored);
-    std::filesystem::remove(path.string() + ".tmp", ignored);
+    std::filesystem::remove_all(directory, ignored);
     ImGui::DestroyContext();
     return EXIT_SUCCESS;
 }

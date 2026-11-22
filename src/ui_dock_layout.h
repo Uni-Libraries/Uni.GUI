@@ -49,6 +49,7 @@ private:
     std::unordered_map<std::string, UiDockLayout> m_layouts;
     std::unordered_map<std::string, std::string> m_saved_ini;
     std::string m_active;
+    bool m_active_applied{}; // A loaded selection can be saved before its first frame.
     std::optional<PendingActivation> m_pending_activation;
     bool m_build_pending{};
     bool m_dirty{};
