@@ -114,6 +114,16 @@ struct CommandStack::Impl final {
     Revisions expected;
     bool busy{false};
 
+    [[nodiscard]] bool TryMergeLast(const Command& newer) noexcept {
+        if (undo.empty()) return false;
+        try {
+            return undo.back()->TryMerge(newer);
+        } catch (...) {
+            // The edit is already committed. Preserve it as an independent entry.
+            return false;
+        }
+    }
+
     [[nodiscard]] Result<void> ValidateBinding(const std::uint64_t current_document_identity,
                                                const std::uint64_t current_presentation_identity,
                                                const Revisions current_revisions,
@@ -293,7 +303,7 @@ Result<CommandResult> CommandStack::Execute(std::unique_ptr<Command> command, Gr
         auto committed = transaction.Commit();
         if (!committed) return committed;
         if (!committed->model_changed && !committed->presentation_changed) {
-            if (!m_impl->undo.empty()) (void)m_impl->undo.back()->TryMerge(*command);
+            (void)m_impl->TryMergeLast(*command);
             return committed;
         }
         m_impl->redo.clear();
@@ -302,7 +312,7 @@ Result<CommandResult> CommandStack::Execute(std::unique_ptr<Command> command, Gr
             return committed;
         }
         m_impl->Bind(document.Identity(), presentation.Identity(), committed->revisions, attempt_invocation.Source());
-        if (!m_impl->undo.empty() && m_impl->undo.back()->TryMerge(*command)) return committed;
+        if (m_impl->TryMergeLast(*command)) return committed;
         m_impl->undo.push_back(std::move(command));
         if (m_impl->undo.size() > m_impl->history_limit) {
             m_impl->undo.erase(m_impl->undo.begin(),
@@ -657,7 +667,7 @@ Result<CommandResult> CommandStack::Resume(const DeferredOperationId operation, 
     m_impl->pending.reset();
     if (kind == Impl::PendingKind::Execute) {
         if (!committed->model_changed && !committed->presentation_changed) {
-            if (!m_impl->undo.empty()) (void)m_impl->undo.back()->TryMerge(*command);
+            (void)m_impl->TryMergeLast(*command);
             return committed;
         }
         m_impl->redo.clear();
@@ -666,7 +676,7 @@ Result<CommandResult> CommandStack::Resume(const DeferredOperationId operation, 
             return committed;
         }
         m_impl->Bind(document.Identity(), presentation.Identity(), committed->revisions, registry_source);
-        if (!m_impl->undo.empty() && m_impl->undo.back()->TryMerge(*command)) return committed;
+        if (m_impl->TryMergeLast(*command)) return committed;
         m_impl->undo.push_back(std::move(command));
         if (m_impl->undo.size() > m_impl->history_limit) {
             m_impl->undo.erase(m_impl->undo.begin(),
@@ -708,13 +718,14 @@ void CommandStack::Clear() noexcept {
 void CommandStack::SetHistoryLimit(const std::size_t limit) {
     if (m_impl->busy || m_impl->pending) return;
     m_impl->history_limit = limit;
-    if (m_impl->undo.size() > limit) {
-        m_impl->undo.erase(m_impl->undo.begin(),
-                           m_impl->undo.begin() + static_cast<std::ptrdiff_t>(m_impl->undo.size() - limit));
-    }
     if (m_impl->redo.size() > limit) {
         m_impl->redo.erase(m_impl->redo.begin(),
                            m_impl->redo.begin() + static_cast<std::ptrdiff_t>(m_impl->redo.size() - limit));
+    }
+    const auto undo_limit = limit - m_impl->redo.size();
+    if (m_impl->undo.size() > undo_limit) {
+        m_impl->undo.erase(m_impl->undo.begin(),
+                           m_impl->undo.begin() + static_cast<std::ptrdiff_t>(m_impl->undo.size() - undo_limit));
     }
     if (limit == 0) {
         Clear();

@@ -52,6 +52,7 @@ void TestPropertyPaths() {
     auto replaced = SetProperty(properties, name, PropertyValue{"renamed"});
     Expect(replaced && FindProperty(*replaced, name)->Get<std::string>() == "renamed",
            "Property paths must replace one nested value without changing the root API");
+    Expect(FindProperty(properties, name)->Get<std::string>() == "right", "The source bag must remain unchanged");
 
     const PropertyPath source{"configuration", std::string{"inputs"}, std::size_t{0}, std::string{"source"}};
     auto erased = SetProperty(*replaced, source, std::nullopt);
@@ -91,6 +92,17 @@ void TestValidationAndLimits() {
     bag_limit.max_values = 1;
     auto bag = ValidatePropertyBag(PropertyBag{{"left", true}, {"right", false}}, bag_limit);
     Expect(!bag && bag.error().code == ErrorCode::SizeLimitExceeded, "Property bag limits must aggregate every root value");
+
+    PropertyLimits key_limit;
+    key_limit.max_string_bytes = 2;
+    auto root_key = ValidatePropertyBag(PropertyBag{{"abc", true}}, key_limit);
+    auto nested_key = ValidatePropertyValue(PropertyValue::Object{{"abc", true}}, key_limit);
+    Expect(!root_key && !nested_key && root_key.error().code == ErrorCode::SizeLimitExceeded &&
+               nested_key.error().code == ErrorCode::SizeLimitExceeded, "Oversized keys must report a budget error at any depth");
+    key_limit.max_total_string_bytes = 3;
+    Expect(ValidatePropertyBag(PropertyBag{{"a", "b"}, {"c", true}}, key_limit).has_value() &&
+               !ValidatePropertyBag(PropertyBag{{"a", "b"}, {"c", "d"}}, key_limit),
+           "Root keys and nested values share one inclusive byte budget");
 
     Expect(EstimatePropertyBytes(valid) >= sizeof(PropertyValue), "Property memory estimates must include the root value");
 }

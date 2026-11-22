@@ -70,6 +70,8 @@ Use `GetIf<T>()`, `Get<T>()`, and `Is<T>()` to inspect values. `PropertyPath` is
 
 `PropertyLimits` bounds semantic depth, value count, container elements, and string bytes independently of JSON parsing. `ValidatePropertyValue()` and `ValidatePropertyBag()` are the common ingress contract used by graph mutation, registries, fragments, migrations, and persistence. `OpaqueProperty` contains one canonical typed JSON object for an unknown plugin kind and may occur at any depth; it is not a general extension map for arbitrary future graph fields.
 
+A committed property edit must validate the **resulting bag**, not just the replacement leaf. Each root value starts at depth one; counts and total string bytes are shared by all roots, including bytes in their keys. The bag size and the total number of nested object members are each bounded by `max_object_members`. Oversized keys return `SizeLimitExceeded`; malformed UTF-8 returns `InvalidArgument` within the configured budget.
+
 ## Presentation
 
 `GraphPresentation` is also move-only and contains editor state keyed by semantic IDs:

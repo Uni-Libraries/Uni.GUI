@@ -9,7 +9,12 @@
 #include <string_view>
 #include <utility>
 
+namespace Uni::GUI::Nodes { struct GraphFragment; }
+
 namespace Uni::GUI::Nodes::Detail {
+
+/// Check the fragment's owned forest and its internal intergraph channels without allocating destination IDs.
+[[nodiscard]] Result<void> ValidateFragmentClosure(const GraphFragment& fragment);
 
 [[nodiscard]] inline Result<std::uint64_t> NextRegistryRevision(const std::uint64_t current,
                                                                 const std::string_view domain) {

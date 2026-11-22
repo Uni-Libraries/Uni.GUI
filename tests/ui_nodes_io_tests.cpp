@@ -7,6 +7,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#ifndef _WIN32
+#include <future>
+#include <sys/stat.h>
+#endif
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -502,7 +506,24 @@ void TestMalformedLimitsAndFiles() {
            "Document save must atomically create a JSON file");
     const std::string saved = ReadBytes(path);
     Expect(saved == *json, "Saved bytes must match deterministic serialization");
+    GraphDocument unrelated;
+    auto bad_selection = CaptureGraphFragment(unrelated, fixture.presentation,
+                                             GraphSelection{.graph = unrelated.RootGraph(), .groups = {fixture.group}});
+    Expect(!bad_selection && bad_selection.error().code == ErrorCode::InvalidGraph,
+           "A selected group with missing members must yield an error rather than throwing from node lookup");
+    auto mismatched = SaveGraphDocumentJson(path.string(), unrelated, fixture.presentation);
+    Expect(!mismatched && mismatched.error().code == ErrorCode::InvalidGraph && ReadBytes(path) == saved,
+           "Orphaned presentation must not overwrite a loadable document");
 #ifndef _WIN32
+    const auto fifo = path.string() + ".fifo";
+    Expect(::mkfifo(fifo.c_str(), 0600) == 0, "FIFO fixture must be created");
+    auto fifo_save = std::async(std::launch::async, [&] { return SaveGraphDocumentJson(fifo, GraphDocument{}, GraphPresentation{}); });
+    Expect(fifo_save.wait_for(std::chrono::seconds(5)) == std::future_status::ready,
+           "Checking a non-regular destination must not wait for a writer");
+    auto rejected_fifo = fifo_save.get();
+    Expect(!rejected_fifo && rejected_fifo.error().code == ErrorCode::IoWrite && std::filesystem::is_fifo(fifo),
+           "A FIFO must be rejected rather than replaced");
+    std::filesystem::remove(fifo);
     std::error_code permission_error;
     const auto private_permissions = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write;
     std::filesystem::permissions(path, private_permissions, std::filesystem::perm_options::replace, permission_error);
@@ -899,6 +920,29 @@ void TestGraphAssetsAndStageFourPersistence() {
     auto decoded_owned = DeserializeGraphFragmentJson(*owned_json, registry);
     Expect(decoded_owned && decoded_owned->owned_graphs.size() == 1,
            "Serialized fragments must carry the complete owned graph bundle");
+    const auto check_bad_closure = [&](const GraphFragment& invalid) {
+        const auto epoch = document.AllocationEpoch();
+        const auto presentation_epoch = presentation.AllocationEpoch();
+        const auto encoded = SerializeGraphFragmentJson(invalid);
+        const auto prep = PrepareGraphFragmentPaste(document, presentation, types, invalid, root, {});
+        Expect(!encoded && encoded.error().code == ErrorCode::InvalidGraph && !prep &&
+                   prep.error().code == ErrorCode::InvalidGraph && document.AllocationEpoch() == epoch &&
+                   presentation.AllocationEpoch() == presentation_epoch,
+               "Invalid fragment closure must fail both serialization and preparation before reserving IDs");
+    };
+    auto orphan = *decoded_owned;
+    orphan.nodes.front().creation.node.subgraph.reset();
+    orphan.nodes.front().creation.node.role = NodeRole::Regular;
+    check_bad_closure(orphan);
+    auto duplicate_owner = *decoded_owned;
+    auto extra_owner = duplicate_owner.nodes.front();
+    extra_owner.creation.node.id = NodeId{8'100'001};
+    duplicate_owner.nodes.push_back(extra_owner);
+    check_bad_closure(duplicate_owner);
+    auto foreign_member = *decoded_owned;
+    foreign_member.groups.push_back(GroupPresentation{
+        .id = GroupId{99}, .graph = root, .members = {foreign_member.owned_graphs.front().graph.nodes.begin()->first}});
+    check_bad_closure(foreign_member);
     auto incompatible_owned = *decoded_owned;
     auto& incompatible_graph = incompatible_owned.owned_graphs.front().graph;
     const NodeId incompatible_source{9'100'001};
@@ -934,6 +978,12 @@ void TestGraphAssetsAndStageFourPersistence() {
         .output = incompatible_output,
         .input = incompatible_input,
     });
+    auto bad_channel = incompatible_owned;
+    bad_channel.owned_graphs.front().graph.links.clear();
+    bad_channel.intergraph_links.push_back(IntergraphLink{
+        .id = IntergraphLinkId{42}, .source = {owned_graph, incompatible_source, incompatible_input},
+        .destination = {owned_graph, incompatible_sink, incompatible_output}});
+    check_bad_closure(bad_channel);
     auto rejected_incompatible_owned = PrepareGraphFragmentPaste(
         document,
         presentation,

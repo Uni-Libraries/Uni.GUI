@@ -1693,7 +1693,8 @@ void ValidateFragment(const GraphFragment& fragment) {
             }
         }
         for (const auto& [node_id, state] : owned.nodes) {
-            if (!owned.graph.nodes.contains(node_id) || !Finite(state.position) || !Finite(state.size)) {
+            if (!owned.graph.nodes.contains(node_id) || !Finite(state.position) || !Finite(state.size) ||
+                state.size.x < 0.0f || state.size.y < 0.0f) {
                 Fail(ErrorCode::InvalidGraph, "Owned graph presentation references a missing node");
             }
         }
@@ -1721,13 +1722,7 @@ void ValidateFragment(const GraphFragment& fragment) {
             }
         }
     }
-    std::unordered_set<IntergraphLinkId, IdHash> intergraph_links;
-    for (const auto& link : fragment.intergraph_links) {
-        if (!link.id || !intergraph_links.insert(link.id).second ||
-            !owned_graphs.contains(link.source.graph) || !owned_graphs.contains(link.destination.graph)) {
-            Fail(ErrorCode::InvalidGraph, "Fragment contains an invalid intergraph link");
-        }
-    }
+    if (auto valid = Detail::ValidateFragmentClosure(fragment); !valid) Fail(valid.error().code, valid.error().message);
 }
 
 [[nodiscard]] std::string SdlError(const std::string_view prefix) {
@@ -1892,7 +1887,7 @@ void ValidateFragment(const GraphFragment& fragment) {
     const std::string destination_path(destination);
     const std::string temporary_path(temporary);
     int source = -1;
-    int source_flags = O_RDONLY;
+    int source_flags = O_RDONLY | O_NONBLOCK;
 #ifdef O_CLOEXEC
     source_flags |= O_CLOEXEC;
 #endif
@@ -2023,23 +2018,21 @@ void ValidateFragment(const GraphFragment& fragment) {
     if (path.empty() || path.find('\0') != std::string_view::npos)
         return std::unexpected(Error{ErrorCode::InvalidArgument, "File path cannot be empty or contain NUL"});
     const std::string native(path);
-    SDL_IOStream* stream = SDL_IOFromFile(native.c_str(), "rb");
+    std::unique_ptr<SDL_IOStream, decltype(&SDL_CloseIO)> stream{SDL_IOFromFile(native.c_str(), "rb"), &SDL_CloseIO};
     if (stream == nullptr)
         return std::unexpected(Error{ErrorCode::IoRead, SdlError("Failed to open graph file")});
-    const Sint64 size = SDL_GetIOSize(stream);
+    const Sint64 size = SDL_GetIOSize(stream.get());
     if (size < 0) {
-        (void)SDL_CloseIO(stream);
         return std::unexpected(Error{ErrorCode::IoRead, SdlError("Failed to inspect graph file")});
     }
     if (static_cast<std::uint64_t>(size) > limits.max_bytes) {
-        (void)SDL_CloseIO(stream);
         return std::unexpected(Error{ErrorCode::SizeLimitExceeded, "Graph file exceeds max_bytes"});
     }
     std::string bytes(static_cast<std::size_t>(size), '\0');
-    const bool read = bytes.empty() || SDL_ReadIO(stream, bytes.data(), bytes.size()) == bytes.size();
-    const bool closed = SDL_CloseIO(stream);
-    if (!read || !closed)
+    if (!bytes.empty() && SDL_ReadIO(stream.get(), bytes.data(), bytes.size()) != bytes.size())
         return std::unexpected(Error{ErrorCode::IoRead, SdlError("Failed to read graph file")});
+    if (!SDL_CloseIO(stream.release()))
+        return std::unexpected(Error{ErrorCode::IoRead, SdlError("Failed to close graph file")});
     return bytes;
 }
 
@@ -2171,6 +2164,7 @@ Result<void> DocumentMigrationRegistry::Migrate(GraphArchive& archive) const {
 Result<std::string> SerializeGraphDocumentJson(const GraphDocument& document, const GraphPresentation& presentation,
                                                const GraphIoLimits& limits) {
     try {
+        if (auto valid = ValidateGraphPresentation(document, presentation); !valid) return std::unexpected(valid.error());
         std::string output = DumpJson(EncodeDocumentEnvelope(document, presentation));
         DecodeCounts counts{limits};
         (void)DecodeDocumentArchive(ParseJson(output, limits), counts);

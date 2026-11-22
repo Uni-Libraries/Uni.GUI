@@ -34,6 +34,86 @@ using CommandDetail::ValidGraphInterface;
 
 } // namespace
 
+Result<void> Detail::ValidateFragmentClosure(const GraphFragment& fragment) {
+    struct Entry {
+        const Graph* graph;
+        bool has_owner{false};
+        std::size_t indegree{0};
+        std::vector<GraphId> dependencies;
+    };
+    std::unordered_map<GraphId, Entry, IdHash> graphs;
+    for (const auto& owned : fragment.owned_graphs) {
+        if (!owned.graph.id || owned.graph.lifetime != GraphLifetime::Owned ||
+            !graphs.emplace(owned.graph.id, Entry{&owned.graph}).second) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Invalid owned graph in fragment"));
+        }
+    }
+    const auto check_owner = [&](const NodeInstance& node, Entry* parent) -> Result<void> {
+        if ((node.role == NodeRole::Subgraph) != node.subgraph.has_value()) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Fragment node role does not match its binding"));
+        }
+        if (!node.subgraph || node.subgraph->ownership != SubgraphOwnership::Owned) return {};
+        const auto child = LocalSubgraph(node.subgraph);
+        const auto target = child ? graphs.find(*child) : graphs.end();
+        if (target == graphs.end() || std::exchange(target->second.has_owner, true)) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Fragment owner requires a unique included child"));
+        }
+        if (parent) {
+            parent->dependencies.push_back(*child);
+            ++target->second.indegree;
+        }
+        return {};
+    };
+    for (const auto& item : fragment.nodes) {
+        if (auto valid = check_owner(item.creation.node, nullptr); !valid) return valid;
+    }
+    for (auto& [id, entry] : graphs) {
+        for (const auto& [node_id, node] : entry.graph->nodes) {
+            if (auto valid = check_owner(node, &entry); !valid) return valid;
+        }
+    }
+
+    const auto endpoint_pin = [&](const IntergraphEndpoint& endpoint, NodeRole role, PinDirection direction) -> const PinInstance* {
+        const auto found = graphs.find(endpoint.graph);
+        if (found == graphs.end()) return nullptr;
+        const auto& graph = *found->second.graph;
+        const auto node = graph.nodes.find(endpoint.node);
+        const auto pin = graph.pins.find(endpoint.pin);
+        if (node == graph.nodes.end() || node->second.role != role || pin == graph.pins.end() ||
+            pin->second.node != endpoint.node || pin->second.direction != direction) return nullptr;
+        return &pin->second;
+    };
+    std::unordered_set<PinId, IdHash> endpoints;
+    std::unordered_set<IntergraphLinkId, IdHash> channels;
+    for (const auto& link : fragment.intergraph_links) {
+        const auto* source = endpoint_pin(link.source, NodeRole::IntergraphOutput, PinDirection::Input);
+        const auto* destination = endpoint_pin(link.destination, NodeRole::IntergraphInput, PinDirection::Output);
+        if (!link.id || !channels.insert(link.id).second || !source || !destination ||
+            source->type != destination->type || source->kind != destination->kind ||
+            !endpoints.insert(source->id).second || !endpoints.insert(destination->id).second) {
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Invalid intergraph channel in fragment"));
+        }
+        graphs.at(link.source.graph).dependencies.push_back(link.destination.graph);
+        ++graphs.at(link.destination.graph).indegree;
+    }
+    std::vector<GraphId> pending;
+    for (const auto& [id, entry] : graphs) {
+        if (!entry.has_owner) return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Fragment contains an unowned child graph"));
+        if (entry.indegree == 0) pending.push_back(id);
+    }
+    std::size_t visited = 0;
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        ++visited;
+        for (auto child : graphs.at(id).dependencies) {
+            if (--graphs.at(child).indegree == 0) pending.push_back(child);
+        }
+    }
+    if (visited != graphs.size()) return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Fragment graph dependencies are cyclic"));
+    return {};
+}
+
 Result<GraphFragment> CaptureGraphFragment(const GraphDocument& document, const GraphPresentation& presentation,
                                            const GraphSelection& selection) {
     const auto* graph = document.FindGraph(selection.graph);
@@ -56,7 +136,12 @@ Result<GraphFragment> CaptureGraphFragment(const GraphDocument& document, const 
         if (group == nullptr || group->graph != selection.graph) {
             return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Selected group does not exist in the graph"));
         }
-        selected_nodes.insert(group->members.begin(), group->members.end());
+        for (const NodeId member : group->members) {
+            if (!graph->nodes.contains(member)) {
+                return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Selected group has a missing member"));
+            }
+            selected_nodes.insert(member);
+        }
     }
 
     if (selected_nodes.empty() && selected_groups.empty()) {
@@ -138,19 +223,18 @@ Result<GraphFragment> CaptureGraphFragment(const GraphDocument& document, const 
                     copy.links.emplace(child_link, *state);
                 }
             }
-            for (const auto& [group_id, state] : presentation.Groups()) {
-                (void)group_id;
-                if (state.graph == owned) {
-                    copy.groups.push_back(state);
-                }
+            for (const GroupId group_id : presentation.GroupsForGraph(owned)) {
+                copy.groups.push_back(*presentation.FindGroup(group_id));
             }
             fragment.owned_graphs.push_back(std::move(copy));
         }
     }
-    for (const auto& [link_id, link] : document.IntergraphLinks()) {
-        (void)link_id;
-        if (owned_graph_ids.contains(link.source.graph) && owned_graph_ids.contains(link.destination.graph)) {
-            fragment.intergraph_links.push_back(link);
+    for (const GraphId owned : owned_graph_ids) {
+        for (const IntergraphLinkId id : document.IntergraphLinksForGraph(owned)) {
+            const auto& link = *document.FindIntergraphLink(id);
+            if (link.source.graph == owned && owned_graph_ids.contains(link.destination.graph)) {
+                fragment.intergraph_links.push_back(link);
+            }
         }
     }
     return fragment;
@@ -267,6 +351,7 @@ Result<PreparedGraphFragment> PrepareGraphFragmentPaste(GraphDocument& document,
         }
     }
     std::unordered_map<PinId, const PinInstance*, IdHash> pins_by_id;
+    std::unordered_set<NodeId, IdHash> root_nodes;
     for (const auto& source : fragment.nodes) {
         bool invalid_subgraph = false;
         if (source.creation.node.subgraph) {
@@ -291,6 +376,7 @@ Result<PreparedGraphFragment> PrepareGraphFragmentPaste(GraphDocument& document,
             source.creation.node.pins.size() != source.creation.pins.size()) {
             return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Graph fragment contains an invalid node"));
         }
+        root_nodes.insert(source.creation.node.id);
         std::unordered_set<std::string> semantic_keys;
         for (std::size_t index = 0; index < source.creation.pins.size(); ++index) {
             const auto& pin = source.creation.pins[index];
@@ -348,39 +434,19 @@ Result<PreparedGraphFragment> PrepareGraphFragmentPaste(GraphDocument& document,
             !Finite(source.geometry.position + (position - fragment.origin)) ||
             !std::ranges::all_of(
                 source.members,
-                [&](const NodeId member) { return source_nodes.contains(member) && members.insert(member).second; })) {
+                [&](const NodeId member) { return root_nodes.contains(member) && members.insert(member).second; })) {
             return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Graph fragment contains an invalid group"));
         }
     }
-    std::unordered_set<IntergraphLinkId, IdHash> source_intergraph_links;
-    for (const auto& link : fragment.intergraph_links) {
-        if (!link.id || !source_intergraph_links.insert(link.id).second ||
-            !source_owned_graphs.contains(link.source.graph) || !source_owned_graphs.contains(link.destination.graph) ||
-            !source_nodes.contains(link.source.node) || !source_nodes.contains(link.destination.node) ||
-            !source_pins.contains(link.source.pin) || !source_pins.contains(link.destination.pin)) {
-            return std::unexpected(
-                MakeError(ErrorCode::InvalidGraph, "Graph fragment contains an invalid intergraph link"));
-        }
-    }
+    if (auto valid = Detail::ValidateFragmentClosure(fragment); !valid) return std::unexpected(valid.error());
 
     {
-        std::unordered_map<GraphId, std::size_t, IdHash> indegree;
-        std::unordered_map<GraphId, std::vector<GraphId>, IdHash> edges;
-        for (const auto& owned : fragment.owned_graphs)
-            indegree.emplace(owned.graph.id, 0);
         for (const auto& owned : fragment.owned_graphs) {
             for (const auto& [node_id, node] : owned.graph.nodes) {
                 (void)node_id;
                 if (!node.subgraph) continue;
                 if (const auto* local = std::get_if<DocumentGraphTarget>(&node.subgraph->target)) {
-                    if (node.subgraph->ownership == SubgraphOwnership::Owned) {
-                        if (!source_owned_graphs.contains(local->graph)) {
-                            return std::unexpected(
-                                MakeError(ErrorCode::InvalidGraph, "Owned fragment graph dependency is missing"));
-                        }
-                        edges[owned.graph.id].push_back(local->graph);
-                        ++indegree[local->graph];
-                    } else if (document.FindGraph(local->graph) == nullptr) {
+                    if (node.subgraph->ownership != SubgraphOwnership::Owned && document.FindGraph(local->graph) == nullptr) {
                         return std::unexpected(
                             MakeError(ErrorCode::InvalidGraph, "Referenced fragment graph dependency does not exist"));
                     }
@@ -393,20 +459,6 @@ Result<PreparedGraphFragment> PrepareGraphFragmentPaste(GraphDocument& document,
                     }
                 }
             }
-        }
-        std::vector<GraphId> pending;
-        for (const auto& [id, count] : indegree)
-            if (count == 0) pending.push_back(id);
-        std::size_t visited = 0;
-        while (!pending.empty()) {
-            const GraphId id = pending.back();
-            pending.pop_back();
-            ++visited;
-            for (const GraphId child : edges[id])
-                if (--indegree[child] == 0) pending.push_back(child);
-        }
-        if (visited != fragment.owned_graphs.size()) {
-            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Owned fragment graph closure is recursive"));
         }
     }
 

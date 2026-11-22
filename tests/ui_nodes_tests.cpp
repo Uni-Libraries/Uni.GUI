@@ -502,11 +502,43 @@ void TestCoreCommandsAndRevisions() {
             std::make_unique<AddNodeCommand>(graph, std::move(*sink), NodePresentation{.position = {300.0f, 20.0f}}),
             document, presentation, types, "Sink add must execute");
 
-    const auto static_revision = document.ModelRevision();
+    class RestoreProbe final : public Command {
+      public:
+        explicit RestoreProbe(NodeId owner) : owner_(owner) {}
+        std::string_view Name() const noexcept override { return "Restore snapshot validation"; }
+      private:
+        Result<void> Apply(GraphTransaction& tx, const RegistrySnapshot&) override { return tx.SetSchemaVersion(2); }
+        Result<void> Revert(GraphTransaction& tx) override {
+            const GraphId graph = tx.Document().RootGraph();
+            const Link unrelated{LinkId{42}, PinId{10}, PinId{11}};
+            auto node = tx.RestoreNode(graph, RemovedNode{
+                .node = NodeInstance{.id = NodeId{100}, .type = TypeId{"probe"}}, .links = {unrelated}});
+            auto pin = tx.RestoreDynamicPin(graph, RemovedPin{
+                .pin = PinInstance{.id = PinId{100}, .node = owner_, .key = "extra", .type = TypeId{"float"},
+                                   .storage = PinStorage::Dynamic}, .links = {unrelated}});
+            Expect(!node && node.error().code == ErrorCode::InvalidGraph && !pin && pin.error().code == ErrorCode::InvalidGraph &&
+                       !tx.Document().FindNode(graph, NodeId{100}) && !tx.Document().FindPin(graph, PinId{100}),
+                   "Malformed restore data must leave no partial node or dynamic pin in staging");
+            return tx.SetSchemaVersion(1);
+        }
+        NodeId owner_;
+    };
+    Execute(commands, std::make_unique<RestoreProbe>(source_id), document, presentation, types,
+            "Restore probe must enter history");
+    Expect(commands.Undo(document, presentation, types) && document.AllocateNodeId().Value() < 100 &&
+               document.AllocatePinId().Value() < 100, "Failed restores must not consume the observed ID space");
+    const auto after_probe_revision = document.ModelRevision();
+    const std::string invalid_key(1, static_cast<char>(0xff));
+    auto invalid_property = commands.Execute(
+        std::make_unique<SetNodePropertyCommand>(graph, source_id, invalid_key, PropertyValue{true}),
+        document, presentation, types);
+    Expect(!invalid_property && invalid_property.error().code == ErrorCode::InvalidArgument &&
+               document.ModelRevision() == after_probe_revision && !document.FindNode(graph, source_id)->properties.contains(invalid_key),
+           "Property edits must validate the resulting bag, including its root keys");
     auto remove_static =
         commands.Execute(std::make_unique<RemoveDynamicPinCommand>(graph, output), document, presentation, types);
     Expect(!remove_static && remove_static.error().code == ErrorCode::InvalidArgument &&
-               document.ModelRevision() == static_revision,
+               document.ModelRevision() == after_probe_revision,
            "Dynamic pin commands must not remove descriptor-owned static pins");
 
     const LinkId link = document.AllocateLinkId();
@@ -1610,6 +1642,34 @@ void TestCompatibilityOwnershipAndHistory() {
     commands.SetHistoryLimit(1);
     Expect(commands.Redo(first_document, first_presentation, types).has_value(), "Retained redo command must execute");
     Expect(!commands.CanRedo(), "History limit must trim excess redo entries");
+
+    class ThrowingMerge final : public Command {
+        std::string_view Name() const noexcept override { return "Throwing merge"; }
+        Result<void> Apply(GraphTransaction& tx, const RegistrySnapshot&) override { return tx.SetSchemaVersion(5); }
+        Result<void> Revert(GraphTransaction& tx) override { return tx.SetSchemaVersion(1); }
+        bool TryMerge(const Command&) override { throw std::runtime_error("Cannot merge"); }
+    };
+    commands.SetHistoryLimit(2);
+    Execute(commands, std::make_unique<ThrowingMerge>(), first_document, first_presentation, types,
+            "Throwing merge fixture must execute");
+    Execute(commands, std::make_unique<SetSchemaVersionCommand>(6), first_document, first_presentation, types,
+            "A failed post-commit merge must keep the new command in history");
+    Expect(commands.Undo(first_document, first_presentation, types) && first_document.SchemaVersion() == 5 &&
+               commands.Undo(first_document, first_presentation, types) && first_document.SchemaVersion() == 1,
+           "After a declined merge both independent undo entries must remain usable");
+
+    commands.SetHistoryLimit(4);
+    for (const auto version : {2U, 3U, 4U}) {
+        Execute(commands, std::make_unique<SetSchemaVersionCommand>(version), first_document, first_presentation,
+                types, "Mixed history command must execute");
+    }
+    Expect(commands.Undo(first_document, first_presentation, types).has_value(), "Mixed history must retain redo");
+    commands.SetHistoryLimit(2);
+    Expect(commands.Redo(first_document, first_presentation, types).has_value() &&
+               commands.Undo(first_document, first_presentation, types).has_value() &&
+               commands.Undo(first_document, first_presentation, types).has_value() &&
+               first_document.SchemaVersion() == 2 && !commands.CanUndo(),
+           "Reducing history must bound undo and redo together and preserve a contiguous replay sequence");
 
     GraphDocument exhausted;
     GraphPresentation exhausted_presentation;
@@ -5080,6 +5140,25 @@ void TestRemovedGraphOwnershipClosure() {
                document.FindGraph(parent) != nullptr && document.FindGraph(child) != nullptr &&
                document.ValidateStructure().has_value(),
            "Removing an owner graph alone must not orphan its retained owned child");
+
+    std::vector<std::unique_ptr<Command>> replace;
+    replace.push_back(std::make_unique<DirectRemoveGraphsCommand>(std::vector<GraphId>{parent}));
+    replace.push_back(std::make_unique<AddGraphCommand>(parent));
+    auto replaced = commands.Execute(std::make_unique<CompoundCommand>("Replace owner graph", std::move(replace)),
+                                     document, presentation, types);
+    Expect(!replaced && replaced.error().code == ErrorCode::InvalidGraph && document.ModelRevision() == revision &&
+               document.FindNode(parent, owner) && !commands.CanUndo() && document.ValidateStructure(),
+           "Reusing the removed graph ID must not hide a lost ownership edge from commit validation");
+
+    const auto parent_revisions = document.GraphRevisions(parent);
+    std::vector<std::unique_ptr<Command>> restore;
+    restore.push_back(std::make_unique<DirectRemoveGraphsCommand>(std::vector<GraphId>{parent}));
+    restore.push_back(std::make_unique<AddGraphCommand>(*document.FindGraph(parent)));
+    restore.push_back(std::make_unique<SetSchemaVersionCommand>(2));
+    Execute(commands, std::make_unique<CompoundCommand>("Restore identical parent", std::move(restore)),
+            document, presentation, types, "A net-zero graph edit may accompany a document edit");
+    Expect(document.GraphRevisions(parent) == parent_revisions && document.ValidateStructure(),
+           "Recreating an identical graph must not reset its revision counters");
 
     auto complete = commands.Execute(std::make_unique<DirectRemoveGraphsCommand>(std::vector<GraphId>{parent, child}),
                                      document, presentation, types);

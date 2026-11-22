@@ -42,6 +42,8 @@ Any failed apply, validation error, exception converted by a callback boundary, 
 
 Transactions maintain an entity journal. Finalization compares only journaled semantic and presentation entities to determine real changes, revision domains, and the incremental validation set. Normal commits never call the full document audit. `ValidateStructure()` remains the explicit import/diagnostic oracle and also verifies derived semantic indexes. The COW and journal counters are described in [performance](performance.md).
 
+Removing a graph and adding the same ID in a single command is checked against the original graph: dropping an owner edge must not orphan its child, and removed nodes or links must not leave presentation entries behind. An identical final graph retains its previous revisions even if another edit in the transaction commits. During undo, `RestoreNode()` and `RestoreDynamicPin()` accept only incident links; a failed restore does not leave partially restored entities or advance staged ID generators.
+
 ## Built-In Commands
 
 The public command set covers:
@@ -130,6 +132,8 @@ Custom commands do not declare authorization intents. Every successful transacti
 
 `TryMerge()` defaults to `false`. `SetNodePropertyCommand::Edit` and `NodeUiContext::EditProperty()` use it to coalesce an active ImGui gesture. Property commands address a `PropertyPath`; nested set or erase operations replace the root tree atomically, preserve sibling values, and retain exact leaf values for undo, redo, and policy inspection.
 
+Merging is optional and runs **after** commit. A throwing merge is treated as declined: the newly applied edit remains independently undoable. A custom merge must preserve the older command's undo/redo data if it declines or throws.
+
 ## Undo And Redo
 
 The default history limit is 256 commands. Construction options also bound policy batches and replacement depth:
@@ -147,7 +151,7 @@ auto undone = commands.Undo(document, presentation, registry);
 auto redone = commands.Redo(document, presentation, registry, policy);
 ```
 
-Executing a changed command clears redo. Lowering the limit drops oldest entries. A limit of zero clears and disables history while still allowing commands to execute. While a deferred operation is pending, execute/undo/redo and history-limit changes are blocked; use `Resume()` or `Cancel()` first.
+Executing a changed command clears redo. The limit counts undo and redo together. Lowering it drops the oldest applied edits first, then the farthest future redo entries if necessary, so remaining entries can still be replayed in order. A limit of zero clears and disables history while still allowing commands to execute. While a deferred operation is pending, execute/undo/redo and history-limit changes are blocked; use `Resume()` or `Cancel()` first.
 
 If policy defers an operation, the retained transaction stores a plain immutable catalog snapshot plus only the dependencies read by the final command attempt, not the internal invocation lease. Catalog mutation is therefore unblocked as soon as the original execute, undo, or redo returns. Resume compares positive/negative descriptor and conversion lookups, descriptor/conversion domain roots and revisions, or the exact combined generation only when those values were read. Unrelated updates remain valid; a changed recorded dependency returns `RevisionConflict` and leaves the operation pending for explicit cancellation. A prepared node/fragment creation also records its descriptor lookup and validates the current version/static schema during `Apply()`; additional `PinStorage::Dynamic` pins remain valid. A conversion command prepared but not yet staged fails closed if its exact recipe is replaced before `Execute()`.
 

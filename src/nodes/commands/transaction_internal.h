@@ -226,6 +226,7 @@ struct GraphTransaction::Impl final {
     GroupMemberDifference(const GroupMemberSet& before, const GroupMemberSet& after);
 
     void TouchGraph(GraphId graph, TransactionDetail::SemanticDomain domain);
+    void TouchAddedGraph(GraphId graph);
     void TouchNode(GraphId graph, NodeId node, TransactionDetail::SemanticDomain domain);
     void TouchPin(GraphId graph, PinId pin, TransactionDetail::SemanticDomain domain);
     void TouchLink(GraphId graph, LinkId link, TransactionDetail::SemanticDomain domain);

@@ -22,6 +22,8 @@ Modes are strict:
 - `Replace` fails with `AssetNotFound` if the ID does not exist.
 - `Upsert` accepts either state.
 
+`Write()` and `ValidateWrite()` reject any other mode with `InvalidArgument`; it is not treated as an upsert.
+
 Before a successful mutation, the registry validates the incoming document/presentation, root graph, dependency uses, cycles containing the changed record, and the affected reverse dependency closure. Referenced dependencies must already be registered. `ValidateAll()` remains the explicit full diagnostic audit. Failed writes leave all records, generations, hashes, and reverse indexes unchanged.
 
 `Unregister()` fails with `AssetInUse` while any registered asset depends on the target. Remove dependents first. `ValidateAll()` repeats complete registry validation.
@@ -87,6 +89,8 @@ subscription.Reset();
 After a successful content write, callbacks receive `Inserted` or `Replaced`, followed by `DependencyChanged` for transitive dependents. Removal emits `Removed`. Events own `before`/`after` record snapshots; dependency events also own the changed dependency snapshots. A URI-only replacement emits one `Replaced` event and does not invalidate dependents.
 
 Callbacks run synchronously on the thread performing `Write()` or `Unregister()`, after the registry has committed. Their exceptions are swallowed so one subscriber cannot unwind a registry mutation. Mutating the same logical registry implementation from a change callback is rejected with `CommandFailed`; schedule a later main-thread action instead. A strong dispatch guard makes moving, move-assigning, or destroying the registry owner from a callback memory-safe. The callback snapshot for the current event batch is fixed before dispatch, so subscription changes affect later batches.
+
+Each subscription retains one callable instance. Mutable closure state (for example, a counter captured by value) survives successive writes and removals; snapshots retain the callable rather than copying it per event batch.
 
 ## Persistence Lifecycle
 

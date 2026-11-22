@@ -50,6 +50,8 @@ After load, use `ValidateGraphDependencies()` with a `GraphAssetRegistry` and `V
 
 Serialization receives live `GraphDocument` and `GraphPresentation` owners and never inspects a command stack. A deferred transaction remains private staged state, so `SerializeGraphDocumentJson()`, `SaveGraphDocumentJson()`, and `NodeEditorWorkspace::Save()` serialize only the last committed state while authorization is pending. Deferred requests, staged mutations, history, and registry snapshots are not persisted.
 
+Presentation is checked against the supplied document before saving: a node or link entry with no semantic entity returns `InvalidGraph`, rather than producing a file the loader cannot import. A document does not need presentation entries for all of its entities.
+
 `NodeEditorWorkspace::Load()` replaces live owners and is therefore blocked with `OperationPending` while a deferred transaction exists; it is also blocked while the command stack is busy. Resume or cancel before loading. A failed or rejected load leaves the complete committed workspace unchanged.
 
 ## Document Migrations
@@ -150,6 +152,8 @@ Paths must be non-empty and contain no embedded NUL. On POSIX, an existing desti
 
 If writing or replacement fails, the helper removes its temporary file where possible and leaves a structured `IoWrite` error. Atomic replacement protects readers from partial file contents; it does not coordinate multiple graph files as one transaction.
 
+On POSIX the regular-file check does not wait for a FIFO writer. If directory synchronization fails *after* a successful rename, the save reports `IoWrite` but the replacement is already visible; crash durability is not confirmed.
+
 ## Fragments
 
 `CaptureGraphFragment()` captures selected nodes, internal links, groups, presentation, and recursively owned graph closures. `SerializeGraphFragmentJson()` produces a portable fragment. Loading applies node migrations but has no document-schema migration parameter.
@@ -168,6 +172,8 @@ if (prepared) {
 ```
 
 Preparation remaps graph, node, pin, link, group, route-point, and intergraph-link IDs and captures descriptor schema provenance for registered node types. `PasteGraphFragmentCommand::Apply()` records those descriptor dependencies and rejects removed or schema-incompatible replacements while preserving intentional dynamic pins. Paste is atomic and undoable. Owned hierarchy behavior is covered in [hierarchy](hierarchy.md).
+
+Both fragment JSON and paste preparation check that every bundled graph has exactly one owner, and that its ownership and intergraph edges together are acyclic. Intergraph endpoints must resolve to matching proxy nodes and pins in the named graphs. Top-level groups cannot include nodes from owned graphs. These errors are rejected before paste reserves any IDs.
 
 ## Graph Assets
 

@@ -147,16 +147,10 @@ Result<CommandResult> GraphTransaction::Commit() {
         }
         for (const GraphId graph : finalized.graphs) {
             const auto* after = Document().FindGraph(graph);
-            if (after != nullptr && m_impl->baseline_document.FindGraph(graph) == nullptr) {
-                const std::size_t owners = Document().OwnedSubgraphCallerCount(graph);
-                if ((after->lifetime == GraphLifetime::Owned && owners != 1) ||
-                    (after->lifetime == GraphLifetime::Reusable && owners != 0)) {
-                    return std::unexpected(MakeError(ErrorCode::InvalidGraph,
-                                                     "Added graph lifetime does not match its final owner count"));
-                }
+            if (after != nullptr) {
+                if (auto valid = Document().ValidateTargetOwnership(graph); !valid) return std::unexpected(valid.error());
                 continue;
             }
-            if (after != nullptr) continue;
             const auto* before = m_impl->baseline_document.FindGraph(graph);
             if (before != nullptr) {
                 for (const auto& [node, value] : before->nodes) {

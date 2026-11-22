@@ -551,7 +551,8 @@ bool SetNodePropertyCommand::TryMerge(const Command& newer) {
         m_impl->merge_open = false;
         return false;
     }
-    m_impl->value = property->m_impl->value;
+    auto value = property->m_impl->value;
+    m_impl->value = std::move(value);
     if (property->m_impl->impact && (!m_impl->impact || static_cast<std::uint8_t>(*property->m_impl->impact) >
                                                             static_cast<std::uint8_t>(*m_impl->impact))) {
         m_impl->impact = property->m_impl->impact;

@@ -49,57 +49,6 @@ PropertyValue::PropertyValue(Array item) : value(std::move(item)) {}
 PropertyValue::PropertyValue(Object item) : value(std::move(item)) {}
 PropertyValue::PropertyValue(OpaqueProperty item) : value(std::move(item)) {}
 
-namespace {
-
-Result<PropertyValue> ReplaceNested(
-    const PropertyValue& root,
-    const std::span<const PropertyPathSegment> path,
-    const std::optional<PropertyValue>& value) {
-    if (path.empty()) {
-        if (!value)
-            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "A nested path value cannot be erased from its parentless root"));
-        return *value;
-    }
-    if (const auto* key = std::get_if<std::string>(&path.front())) {
-        const auto* source = root.GetIf<PropertyValue::Object>();
-        if (source == nullptr)
-            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path requires an object"));
-        PropertyValue::Object object = *source;
-        const auto found = object.find(*key);
-        if (path.size() == 1) {
-            if (value) object.insert_or_assign(*key, *value);
-            else if (found != object.end()) object.erase(found);
-            else return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path does not exist"));
-            return object;
-        }
-        if (found == object.end())
-            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path does not exist"));
-        auto replaced = ReplaceNested(found->second, path.subspan(1), value);
-        if (!replaced) return replaced;
-        found->second = std::move(*replaced);
-        return object;
-    }
-    const auto* source = root.GetIf<PropertyValue::Array>();
-    const std::size_t index = std::get<std::size_t>(path.front());
-    if (source == nullptr || index >= source->size())
-        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path array index does not exist"));
-    PropertyValue::Array array = *source;
-    if (path.size() == 1) {
-        if (!value)
-            return std::unexpected(MakeError(
-                ErrorCode::InvalidArgument,
-                "Array elements cannot be erased by a property set; replace the containing array instead"));
-        array[index] = *value;
-        return array;
-    }
-    auto replaced = ReplaceNested(array[index], path.subspan(1), value);
-    if (!replaced) return replaced;
-    array[index] = std::move(*replaced);
-    return array;
-}
-
-} // namespace
-
 const PropertyValue* FindProperty(const PropertyBag& properties, const PropertyPath& path) noexcept {
     const std::string* root = path.Root();
     if (root == nullptr || root->empty()) return nullptr;
@@ -139,23 +88,64 @@ Result<PropertyBag> SetProperty(
     }
     if (found == result.end())
         return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path root does not exist"));
-    auto replacement = ReplaceNested(found->second, path.Nested(), value);
-    if (!replacement) return std::unexpected(std::move(replacement.error()));
-    found->second = std::move(*replacement);
+    PropertyValue* current = &found->second;
+    auto remaining = path.Nested();
+    while (!remaining.empty()) {
+        const auto& segment = remaining.front();
+        remaining = remaining.subspan(1);
+        if (const auto* key = std::get_if<std::string>(&segment)) {
+            auto* object = current->GetIf<PropertyValue::Object>();
+            if (!object) return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path requires an object"));
+            if (remaining.empty() && value) {
+                object->insert_or_assign(*key, std::move(*value));
+                break;
+            }
+            const auto child = object->find(*key);
+            if (child == object->end()) return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path does not exist"));
+            if (remaining.empty()) object->erase(child);
+            else current = &child->second;
+        } else {
+            auto* array = current->GetIf<PropertyValue::Array>();
+            const auto index = std::get<std::size_t>(segment);
+            if (!array || index >= array->size())
+                return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property path array index does not exist"));
+            current = &(*array)[index];
+            if (remaining.empty()) {
+                if (!value) return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Replace the containing array to erase elements"));
+                *current = std::move(*value);
+            }
+        }
+    }
     return result;
 }
 
-Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLimits& limits) {
+namespace {
+
+struct PropertyValidation {
     struct Pending final {
         const PropertyValue* value;
         std::size_t depth;
     };
 
-    std::vector<Pending> pending{{&value, 1}};
+    const PropertyLimits& limits;
+    std::vector<Pending> pending;
     std::size_t value_count = 0;
     std::size_t array_elements = 0;
     std::size_t object_members = 0;
     std::size_t string_bytes = 0;
+
+    Result<void> CheckKey(const std::string& key) {
+        if (key.size() > limits.max_string_bytes || !AddWithin(string_bytes, key.size(), limits.max_total_string_bytes))
+            return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property key exceeds its configured limit"));
+        if (!Detail::ValidUtf8(key)) return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property key is not valid UTF-8"));
+        return {};
+    }
+
+    Result<void> Visit(const PropertyValue& value);
+};
+
+Result<void> PropertyValidation::Visit(const PropertyValue& value) {
+    pending.push_back({&value, 1});
 
     while (!pending.empty()) {
         const Pending current = pending.back();
@@ -199,7 +189,8 @@ Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLim
                     if (!AddWithin(array_elements, item.size(), limits.max_array_elements)) {
                         return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property array exceeds max_array_elements"));
                     }
-                    pending.reserve(pending.size() + item.size());
+                    if (item.size() > limits.max_values - value_count - pending.size())
+                        return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property value exceeds max_values"));
                     for (auto child = item.rbegin(); child != item.rend(); ++child) {
                         pending.push_back({&*child, current.depth + 1});
                     }
@@ -207,14 +198,10 @@ Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLim
                     if (!AddWithin(object_members, item.size(), limits.max_object_members)) {
                         return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property object exceeds max_object_members"));
                     }
-                    pending.reserve(pending.size() + item.size());
+                    if (item.size() > limits.max_values - value_count - pending.size())
+                        return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property value exceeds max_values"));
                     for (auto child = item.rbegin(); child != item.rend(); ++child) {
-                        if (child->first.size() > limits.max_string_bytes || !Detail::ValidUtf8(child->first)) {
-                            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property object key is invalid"));
-                        }
-                        if (!AddWithin(string_bytes, child->first.size(), limits.max_total_string_bytes)) {
-                            return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property strings exceed max_total_string_bytes"));
-                        }
+                        if (auto valid_key = CheckKey(child->first); !valid_key) return valid_key;
                         pending.push_back({&child->second, current.depth + 1});
                     }
                 } else if constexpr (std::same_as<Item, OpaqueProperty>) {
@@ -236,22 +223,21 @@ Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLim
     return {};
 }
 
+} // namespace
+
+Result<void> ValidatePropertyValue(const PropertyValue& value, const PropertyLimits& limits) {
+    return PropertyValidation{limits}.Visit(value);
+}
+
 Result<void> ValidatePropertyBag(const PropertyBag& properties, const PropertyLimits& limits) {
     if (properties.size() > limits.max_object_members) {
         return std::unexpected(MakeError(ErrorCode::SizeLimitExceeded, "Property bag exceeds max_object_members"));
     }
-    PropertyValue root{properties};
-    PropertyLimits bag_limits = limits;
-    if (bag_limits.max_depth != std::numeric_limits<std::size_t>::max()) ++bag_limits.max_depth;
-    if (bag_limits.max_values != std::numeric_limits<std::size_t>::max()) ++bag_limits.max_values;
-    if (bag_limits.max_object_members <= std::numeric_limits<std::size_t>::max() - properties.size())
-        bag_limits.max_object_members += properties.size();
-    if (auto valid = ValidatePropertyValue(root, bag_limits); !valid) return valid;
+    PropertyValidation validation{limits};
     for (const auto& [key, value] : properties) {
-        (void)value;
-        if (key.empty() || key.size() > limits.max_string_bytes || !Detail::ValidUtf8(key)) {
-            return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property key is invalid"));
-        }
+        if (key.empty()) return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property key is empty"));
+        if (auto valid = validation.CheckKey(key); !valid) return valid;
+        if (auto valid = validation.Visit(value); !valid) return valid;
     }
     return {};
 }

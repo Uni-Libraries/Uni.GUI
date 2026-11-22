@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief Authorization of staged semantic and presentation mutations, preview and deferred decisions.
+
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/presentation.h>
 
@@ -20,6 +23,7 @@ namespace Uni::GUI::Nodes {
 
 class Command;
 
+/// Kind of one leaf mutation, not a command class. A single command can emit many different kinds.
 enum class OperationKind {
     SetSchemaVersion,
     SetRootGraph,
@@ -53,9 +57,12 @@ enum class OperationKind {
     UpdatePin,
 };
 
+/// Set adds or changes the addressed value; Erase removes it. Inspect alongside the typed payload.
 enum class OperationAction { Set, Erase };
+/// Distinguishes semantic protection from a presentation lock.
 enum class ProtectionKind { ReadOnly, Locked };
 
+/// Bitmask identifying affected link presentation domains. A style-only edit need not carry a route.
 enum class LinkPresentationImpact : std::uint8_t {
     None = 0,
     Style = 1U << 0U,
@@ -79,12 +86,14 @@ constexpr LinkPresentationImpact& operator|=(
     return left;
 }
 
+/// True if any requested bit is present.
 [[nodiscard]] constexpr bool HasImpact(
     const LinkPresentationImpact value,
     const LinkPresentationImpact impact) noexcept {
     return (static_cast<std::uint8_t>(value) & static_cast<std::uint8_t>(impact)) != 0;
 }
 
+/// Child ordinal and diagnostic command name at one level of a compound command.
 struct CommandPathEntry final {
     std::size_t child{0};
     std::string name;
@@ -92,6 +101,9 @@ struct CommandPathEntry final {
     bool operator==(const CommandPathEntry&) const = default;
 };
 
+/// Shared immutable sequence describing the command scope that produced a leaf. A null handle is
+/// an empty path. Indexed access is unchecked (index < size()); iterators/references borrow the
+/// shared storage. Copy the path to keep entries alive independently of the callback.
 class CommandPath final {
 public:
     using Storage = std::vector<CommandPathEntry>;
@@ -120,6 +132,7 @@ private:
     std::shared_ptr<const Storage> m_entries;
 };
 
+/// Graph-level fields for policy inspection, without copies of node/pin/link maps.
 struct GraphMetadata final {
     std::string display_name;
     GraphLifetime lifetime{GraphLifetime::Reusable};
@@ -127,22 +140,29 @@ struct GraphMetadata final {
     bool read_only{false};
 };
 
+/// Proposed application schema number (not wire version).
 struct SchemaVersionOperation final { std::uint32_t version{0}; };
+/// Proposed entry graph ID.
 struct RootGraphOperation final { GraphId graph; };
+/// Identity and immutable metadata of the affected graph.
 struct GraphOperation final {
     GraphId graph;
     std::shared_ptr<const GraphMetadata> value;
 };
+/// Affected node and graph. An add preview may supply only a type, without an allocated node or ID.
 struct NodeOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const NodeInstance> value;
     std::shared_ptr<const TypeId> preview_type;
 
+    /// Borrow the stored or preview type; null if neither was supplied.
     [[nodiscard]] const TypeId* Type() const noexcept {
         return value ? &value->type : preview_type.get();
     }
 };
+/// Pin record and its owner. index, when known, is an ordinal in the owning node's pin order;
+/// NoIndex means the intent does not specify an ordinal.
 struct PinOperation final {
     static constexpr std::size_t NoIndex = std::numeric_limits<std::size_t>::max();
 
@@ -154,44 +174,56 @@ struct PinOperation final {
 
     [[nodiscard]] bool HasIndex() const noexcept { return index != NoIndex; }
 };
+/// Exact local edge (or proposed endpoints and possibly zero ID for preview).
 struct LinkOperation final {
     GraphId graph;
     Link value;
 };
+/// Full pin ordering of the addressed node, not only the moved IDs.
 struct ReorderPinsOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const std::vector<PinId>> order;
 };
+/// Before/after **leaf** values at path. Disengaged means absent, not a stored PropertyNull.
 struct PropertyChange final {
     PropertyPath path;
     std::optional<PropertyValue> current;
     std::optional<PropertyValue> previous;
 };
+/// A property delta on a particular node; owns its immutable change record.
 struct PropertyOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const PropertyChange> change;
 };
+/// Display-name edit with immutable text (does not change semantic type).
 struct NodeTextOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const std::string> text;
 };
+/// Before/after subgraph bindings; nullopt means no binding.
 struct SubgraphChange final {
     std::optional<SubgraphReference> current;
     std::optional<SubgraphReference> previous;
 };
+/// Binding delta at a single call site; related projection mutations may emit additional intents.
 struct NodeSubgraphOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const SubgraphChange> change;
 };
+/// Versioned graph signature, including ordered interface pins.
 struct GraphInterfaceOperation final {
     GraphId graph;
     std::shared_ptr<const GraphInterface> value;
 };
+/// Exact immutable cross-graph edge affected by connect/disconnect.
 struct IntergraphOperation final { std::shared_ptr<const IntergraphLink> value; };
+/// @name Protection targets
+/// Type distinguishes which entity is being protected. IDs refer to the indicated graph.
+/// @{
 struct GraphProtectionTarget final { GraphId graph; };
 struct NodeProtectionTarget final { GraphId graph; NodeId node; };
 struct PinProtectionTarget final { GraphId graph; PinId pin; };
@@ -203,16 +235,20 @@ using ProtectionTarget = std::variant<
     PinProtectionTarget,
     LinkProtectionTarget,
     GroupProtectionTarget>;
+/// @}
+/// Explicit protection transition, whose value is the new bit (not authorization of later edits).
 struct ProtectionOperation final {
     ProtectionTarget target;
     ProtectionKind kind{ProtectionKind::ReadOnly};
     bool value{false};
 };
+/// Node presentation record addressed by semantic node ID; action distinguishes update/removal.
 struct NodePresentationOperation final {
     GraphId graph;
     NodeId node;
     std::shared_ptr<const NodePresentation> value;
 };
+/// Read impact before interpreting style and route: unrelated fields need not accompany a delta.
 struct LinkPresentationOperation final {
     GraphId graph;
     LinkId link;
@@ -220,31 +256,37 @@ struct LinkPresentationOperation final {
     std::shared_ptr<const LinkStyle> style;
     PersistentRoutePointSequence route;
 };
+/// Full presentation record for group creation or removal, not the payload of a granular update.
 struct GroupLifecycleOperation final {
     GraphId graph;
     GroupId group;
     std::shared_ptr<const GroupPresentation> value;
 };
+/// Fixed-size geometry state, independent of membership and style.
 struct GroupGeometryOperation final {
     GraphId graph;
     GroupId group;
     GroupGeometry value;
 };
+/// New shared style without a membership copy.
 struct GroupStyleOperation final {
     GraphId graph;
     GroupId group;
     GroupStyleHandle value;
 };
+/// Actual member IDs added/removed, not a snapshot of all members.
 struct GroupMembershipChange final {
     std::vector<NodeId> added;
     std::vector<NodeId> removed;
 };
+/// Membership delta for a particular group in its graph.
 struct GroupMembershipOperation final {
     GraphId graph;
     GroupId group;
     std::shared_ptr<const GroupMembershipChange> change;
 };
 
+/// Discriminated payload; use OperationIntent::Get() rather than relying on a variant ordinal.
 using OperationPayload = std::variant<
     SchemaVersionOperation,
     RootGraphOperation,
@@ -266,6 +308,8 @@ using OperationPayload = std::variant<
     GroupStyleOperation,
     GroupMembershipOperation>;
 
+/// One effective set/erase and its command path. Copies own the payload (possibly through shared
+/// immutable handles); a callback's reference to the original intent is valid only during the call.
 struct OperationIntent final {
     OperationKind kind;
     OperationAction action;
@@ -275,6 +319,7 @@ struct OperationIntent final {
     OperationIntent(OperationKind operation_kind, OperationAction operation_action, OperationPayload operation_payload)
         : kind(operation_kind), action(operation_action), payload(std::move(operation_payload)) {}
 
+    /// Borrow the active alternative, or null for a different payload type.
     template<typename Payload>
     [[nodiscard]] const Payload* Get() const noexcept {
         return std::get_if<Payload>(&payload);
@@ -284,9 +329,13 @@ struct OperationIntent final {
 static_assert(sizeof(CommandPath) <= 2 * sizeof(void*));
 static_assert(sizeof(OperationIntent) <= 96, "OperationIntent must remain compact enough for massive batches");
 
+/// Preview has no staged transaction; Undo describes the inverse leaf mutations, not the original batch.
 enum class OperationPhase { Execute, Undo, Redo, Preview };
+/// Resume denotes reauthorization of already prepared changes (the command is not applied again).
 enum class PolicyEvaluationPass { Initial, Resume };
 
+/// Invocation-only views before and after the **whole** staged command. operation_index is zero-based
+/// within batch_size; staged state is not a per-leaf intermediate state. In preview the views coincide.
 struct OperationPolicyContext final {
     const GraphDocument& before_document;
     const GraphPresentation& before_presentation;
@@ -298,6 +347,7 @@ struct OperationPolicyContext final {
     std::size_t batch_size{0};
 };
 
+/// Invocation-only views accompanying the complete immutable intent span after staging.
 struct BatchPolicyContext final {
     const GraphDocument& before_document;
     const GraphPresentation& before_presentation;
@@ -308,10 +358,13 @@ struct BatchPolicyContext final {
     std::size_t batch_size{0};
 };
 
+/// Authorize this leaf; other leaves or the batch policy may still prevent commit.
 struct AllowOperation final {};
+/// Deny the entire transaction; an empty reason receives a default diagnostic.
 struct DenyOperation final {
     std::string reason;
 };
+/// Retain a non-empty application request for this leaf, e.g. an approval ticket. Use owning data.
 struct DeferOperation final {
     std::any request;
 };
@@ -320,15 +373,21 @@ using OperationPolicyDecision = std::variant<AllowOperation, DenyOperation, Defe
 using EvaluateOperationFn =
     std::function<OperationPolicyDecision(const OperationPolicyContext&, const OperationIntent&)>;
 
+/// Approve the batch, subject to every leaf decision.
 struct AllowBatch final {};
+/// Reject the entire staged change, suppressing replacement and deferral.
 struct DenyBatch final { std::string reason; };
+/// Initial execute only: discard this attempt and restage the non-null command returned by the
+/// factory. The factory must not reenter the same stack. Replacement depth is bounded.
 struct ReplaceBatch final { std::function<std::unique_ptr<Command>()> make_command; };
+/// Non-empty application request for the complete batch (no leaf index).
 struct DeferBatch final { std::any request; };
 using BatchPolicyDecision = std::variant<AllowBatch, DenyBatch, ReplaceBatch, DeferBatch>;
 using EvaluateBatchFn = std::function<BatchPolicyDecision(
     const BatchPolicyContext&,
     std::span<const OperationIntent>)>;
 
+/// Stack-local pending operation identifier, zero when absent. Not a persistent document ID.
 struct DeferredOperationId final {
     std::uint64_t value{0};
 
@@ -338,6 +397,7 @@ struct DeferredOperationId final {
 
 enum class DeferredRequestScope { Operation, Batch };
 
+/// Owning policy request; operation-scoped entries have a batch index and path, batch-scoped ones do not.
 struct DeferredRequest final {
     DeferredRequestScope scope{DeferredRequestScope::Operation};
     std::optional<std::size_t> operation_index;
@@ -345,6 +405,8 @@ struct DeferredRequest final {
     std::any request;
 };
 
+/// Retained authorization description, not committed state. All requests belong to one transaction
+/// to be resumed or cancelled together. Copy this object when it must outlive PendingOperation().
 struct DeferredOperation final {
     DeferredOperationId id;
     OperationPhase phase{OperationPhase::Execute};
@@ -352,6 +414,7 @@ struct DeferredOperation final {
     std::vector<DeferredRequest> requests;
 };
 
+/// Connection preview after direction normalization; node/pin arguments borrow the candidate endpoints.
 struct ConnectionPolicyRequest final {
     GraphId graph;
     const NodeInstance& output_node;
@@ -360,35 +423,51 @@ struct ConnectionPolicyRequest final {
     const PinInstance& input;
     std::optional<Link> replacing;
 };
+/// Creation preview before a new instance ID is required.
 struct CreateNodePolicyRequest final {
     GraphId graph;
     TypeId type;
 };
+/// Preview target for erasing a node in its containing graph.
 struct DeleteNodePolicyRequest final {
     GraphId graph;
     NodeId node;
 };
+/// Identifies a local link deletion by its containing graph and ID.
 struct DeleteLinkPolicyRequest final {
     GraphId graph;
     LinkId link;
 };
+/// Exactly one borrowed pointer is required: after for add or before for removal.
 struct GroupLifecyclePolicyRequest final {
     GraphId graph;
     const GroupPresentation* before;
     const GroupPresentation* after;
 };
 
+/// Synchronous UI-thread authorization. Evaluate all leaves and then the batch; precedence is
+/// deny, replace, defer, allow. Empty callbacks allow by default; callback exceptions, empty
+/// defer requests and empty replacement factories become denials. Policies must not retain
+/// context references, mutate observed owners, allocate live IDs or reenter the same stack.
+/// Persisted read-only and lock checks are independent of these callbacks.
 struct UNI_GUI_EXPORT GraphPolicy final {
     EvaluateOperationFn evaluate_operation;
     EvaluateBatchFn evaluate_batch;
 
+    /// True if both callbacks are absent; no authorization journal is required in that case.
     [[nodiscard]] bool Empty() const noexcept;
+    /// Invoke just the leaf callback with the supplied context; normalize failures to denial.
     [[nodiscard]] OperationPolicyDecision EvaluateOperation(
         const OperationPolicyContext& context,
         const OperationIntent& intent) const;
+    /// Invoke just the batch callback on the borrowed span; does not execute replacement factories.
     [[nodiscard]] BatchPolicyDecision EvaluateBatch(
         const BatchPolicyContext& context,
         std::span<const OperationIntent> batch) const;
+    /// @name Advisory previews
+    /// Evaluate a synthetic singleton leaf, phase Preview, without staging, running the batch policy
+    /// or obtaining final authorization. CheckGroupLifecycle denies a request with both/neither pointer.
+    /// @{
     [[nodiscard]] OperationPolicyDecision
     CheckCreateNode(const GraphDocument&, const GraphPresentation&, const CreateNodePolicyRequest&) const;
     [[nodiscard]] OperationPolicyDecision
@@ -400,16 +479,17 @@ struct UNI_GUI_EXPORT GraphPolicy final {
         const GraphDocument&,
         const GraphPresentation&,
         const GroupLifecyclePolicyRequest&) const;
+    /// @}
 };
 
 enum class UndoPolicyMode {
-    RestoreHistory,
-    RespectCurrentPolicy,
+    RestoreHistory, ///< Restore recorded state without consulting current application policy.
+    RespectCurrentPolicy, ///< Authorize the staged inverse batch under the current policy.
 };
 
 enum class ResumeMode {
-    CommitPrepared,
-    Reauthorize,
+    CommitPrepared, ///< Commit retained work after freshness checks without invoking policy again.
+    Reauthorize, ///< Reevaluate the retained batch with pass Resume; may deny or defer again.
 };
 
 } // namespace Uni::GUI::Nodes

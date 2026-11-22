@@ -128,6 +128,14 @@ void TestLifecycleMetadataAndQueries() {
     std::vector<GraphAssetChange> events;
     auto subscription = assets.Subscribe([&](const GraphAssetChange& event) { events.push_back(event); });
 
+    auto invalid_asset = MakeAsset("asset.bad-mode");
+    constexpr auto invalid_mode = static_cast<GraphAssetWriteMode>(99);
+    const auto check = assets.ValidateWrite(invalid_asset, invalid_mode);
+    const auto bad_write = assets.Write(std::move(invalid_asset), invalid_mode);
+    Expect(!check && !bad_write && check.error().code == ErrorCode::InvalidArgument &&
+               bad_write.error().code == ErrorCode::InvalidArgument && !assets.Find(GraphAssetId{"asset.bad-mode"}) && events.empty(),
+           "An invalid write mode must not be treated as an upsert");
+
     auto dependency = assets.Write(MakeAsset("asset.base"), GraphAssetWriteMode::Insert);
     Expect(
         dependency && dependency->status == GraphAssetWriteStatus::Inserted && dependency->record &&
@@ -448,7 +456,7 @@ void TestCallbackIsolationAndSubscriptionSnapshots() {
         write_rejected = !write && write.error().code == ErrorCode::CommandFailed;
         unregister_rejected = !unregister && unregister.error().code == ErrorCode::CommandFailed;
     });
-    auto observer = assets.Subscribe([&](const GraphAssetChange&) { ++observer_calls; });
+    auto observer = assets.Subscribe([&, calls = 0](const GraphAssetChange&) mutable { observer_calls = ++calls; });
 
     auto content = assets.Write(
         MakeContentAsset("asset.callback.base", "changed"),

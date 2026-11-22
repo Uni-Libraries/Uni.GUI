@@ -234,6 +234,24 @@ void GraphTransaction::Impl::TouchGraph(const GraphId graph, const SemanticDomai
     journal.graphs[graph] |= domain;
 }
 
+void GraphTransaction::Impl::TouchAddedGraph(const GraphId graph) {
+    const auto* before = baseline_document.FindGraph(graph);
+    auto domains = SemanticDomain::Topology | SemanticDomain::Layout;
+    if (before != nullptr) {
+        // Remove + add of an existing ID is a replacement, not a fresh graph.
+        // Include lost owners and presentation dependencies in commit validation.
+        domains |= SemanticDomain::Value;
+        const auto* after = staged_document.FindGraph(graph);
+        before->nodes.ForEachDifference(after->nodes, [&](NodeId id, const NodeInstance*, const NodeInstance*) {
+            TouchNode(graph, id, domains);
+        });
+        before->links.ForEachDifference(after->links, [&](LinkId id, const Link*, const Link*) {
+            TouchLink(graph, id, domains);
+        });
+    }
+    TouchGraph(graph, domains);
+}
+
 void GraphTransaction::Impl::TouchNode(const GraphId graph, const NodeId node, const SemanticDomain domain) {
     journal.nodes[EntityTouch<NodeId>{graph, node}] |= domain;
 }

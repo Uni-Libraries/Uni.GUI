@@ -973,7 +973,7 @@ Result<Graph> GraphDocument::RemoveGraph(const GraphId id) {
     return removed;
 }
 
-Result<void> GraphDocument::RestoreGraph(Graph graph) {
+Result<void> GraphDocument::RestoreGraph(Graph graph, const SemanticRevisionSet revisions) {
     if (!graph.id || !ValidLifetime(graph.lifetime) || !ValidInterface(graph.interface)) {
         return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Graph ID cannot be zero"));
     }
@@ -1107,7 +1107,7 @@ Result<void> GraphDocument::RestoreGraph(Graph graph) {
     }
     m_impl->indexes.AddGraph(graph);
     m_impl->graphs.emplace(id, std::move(graph));
-    m_impl->graph_revisions.emplace(id, SemanticRevisionSet{});
+    m_impl->graph_revisions.emplace(id, revisions);
     return {};
 }
 
@@ -1316,16 +1316,20 @@ Result<RemovedNode> GraphDocument::RemoveNode(const GraphId graph_id, const Node
 }
 
 Result<void> GraphDocument::RestoreNode(const GraphId graph_id, RemovedNode removed) {
+    if (removed.links.empty()) return AddNode(graph_id, std::move(removed.node), removed.pins);
     const NodeId node_id = removed.node.id;
-    if (auto added = AddNode(graph_id, std::move(removed.node), removed.pins); !added) {
+    auto candidate = SnapshotForTransaction();
+    if (auto added = candidate.AddNode(graph_id, std::move(removed.node), removed.pins); !added) {
         return added;
     }
     for (const auto& link : removed.links) {
-        if (auto added = AddLink(graph_id, link); !added) {
-            (void)RemoveNode(graph_id, node_id);
-            return added;
-        }
+        const auto* output = candidate.FindPin(graph_id, link.output);
+        const auto* input = candidate.FindPin(graph_id, link.input);
+        if ((!output || output->node != node_id) && (!input || input->node != node_id))
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Restored link is not incident to the node"));
+        if (auto added = candidate.AddLink(graph_id, link); !added) return added;
     }
+    Swap(candidate);
     return {};
 }
 
@@ -1408,16 +1412,18 @@ Result<RemovedPin> GraphDocument::RemoveDynamicPin(const GraphId graph_id, const
 }
 
 Result<void> GraphDocument::RestoreDynamicPin(const GraphId graph_id, RemovedPin removed) {
+    if (removed.links.empty()) return AddDynamicPin(graph_id, std::move(removed.pin), removed.index);
     const PinId pin_id = removed.pin.id;
-    if (auto result = AddDynamicPin(graph_id, std::move(removed.pin), removed.index); !result) {
+    auto candidate = SnapshotForTransaction();
+    if (auto result = candidate.AddDynamicPin(graph_id, std::move(removed.pin), removed.index); !result) {
         return result;
     }
     for (const auto& link : removed.links) {
-        if (auto result = AddLink(graph_id, link); !result) {
-            (void)RemoveDynamicPin(graph_id, pin_id);
-            return result;
-        }
+        if (link.output != pin_id && link.input != pin_id)
+            return std::unexpected(MakeError(ErrorCode::InvalidGraph, "Restored link is not incident to the pin"));
+        if (auto added = candidate.AddLink(graph_id, link); !added) return added;
     }
+    Swap(candidate);
     return {};
 }
 
@@ -1640,9 +1646,6 @@ Result<void> GraphDocument::SetNodeProperty(const GraphId graph, const NodeId no
     if (key.empty()) {
         return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Property key cannot be empty"));
     }
-    if (value) {
-        if (auto valid = ValidatePropertyValue(*value); !valid) return std::unexpected(valid.error());
-    }
     auto* state = FindGraphMutable(graph);
     if (state == nullptr) {
         return std::unexpected(MakeError(ErrorCode::GraphNotFound, "Graph does not exist"));
@@ -1657,6 +1660,7 @@ Result<void> GraphDocument::SetNodeProperty(const GraphId graph, const NodeId no
     } else {
         node.properties.erase(key);
     }
+    if (auto valid = ValidatePropertyBag(node.properties); !valid) return valid;
     state->nodes.insert_or_assign(node_id, std::move(node));
     return {};
 }

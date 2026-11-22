@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief Semantic entities, persistent maps and the read interface to a live graph document.
+
 #include <uni/gui/export.h>
 #include <uni/gui/nodes/error.h>
 #include <uni/gui/nodes/ids.h>
@@ -30,6 +33,8 @@ class GraphDocument;
 class GraphDocumentSnapshot;
 class GraphTransaction;
 struct Graph;
+/// Capture on the UI thread; include snapshot.h for the complete return type. The copy owns
+/// the committed semantic state via copy-on-write and can be read on workers independently of document.
 [[nodiscard]] UNI_GUI_EXPORT GraphDocumentSnapshot CaptureGraphDocumentSnapshot(const GraphDocument& document);
 namespace Detail {
 struct GraphIoAccess;
@@ -63,6 +68,9 @@ UNI_GUI_EXPORT void RecordCowClone(CowCopyDomain domain, CowCloneKind kind, std:
                                    std::uint64_t logical_bytes) noexcept;
 } // namespace Detail
 
+/// @name Component-wise vector arithmetic
+/// Add/subtract coordinates or scale both components without clamping or checking finiteness.
+/// @{
 [[nodiscard]] constexpr Vec2 operator+(const Vec2 lhs, const Vec2 rhs) noexcept {
     return {lhs.x + rhs.x, lhs.y + rhs.y};
 }
@@ -75,26 +83,33 @@ UNI_GUI_EXPORT void RecordCowClone(CowCopyDomain domain, CowCloneKind kind, std:
     return {value.x * scale, value.y * scale};
 }
 
+/// @}
+
+/// Local links run from an Output to an Input, independent of the order of a user's drag.
 enum class PinDirection {
     Input,
     Output,
 };
 
+/// Data and execution are separate connection domains; the kinds on a link must match.
 enum class PinKind {
     Data,
     Execution,
 };
 
+/// Maximum local incidence: Single admits at most one link, including on outputs.
 enum class PinCardinality {
     Single,
     Multiple,
 };
 
+/// Static pins are descriptor-owned (including configurable schemas); Dynamic pins are instance-owned.
 enum class PinStorage {
     Static,
     Dynamic,
 };
 
+/// Distinguishes ordinary nodes, subgraph calls, local interface projections and cross-graph proxies.
 enum class NodeRole {
     Regular,
     Subgraph,
@@ -104,16 +119,20 @@ enum class NodeRole {
     IntergraphOutput,
 };
 
+/// A reusable graph has no owner; an owned graph needs exactly one owning caller and cannot be root.
 enum class GraphLifetime {
     Reusable,
     Owned,
 };
 
+/// Deleting an owning call site deletes its local owned graph closure. A reference leaves its target intact.
 enum class SubgraphOwnership {
     Referenced,
     Owned,
 };
 
+/// Interface pin identified by a unique semantic key. Direction is from the caller's perspective;
+/// the boundary projection uses the opposite direction and its own cardinality.
 struct GraphInterfacePin final {
     std::string key;
     std::string label;
@@ -126,6 +145,7 @@ struct GraphInterfacePin final {
     bool operator==(const GraphInterfacePin&) const = default;
 };
 
+/// Versioned, ordered signature projected onto local callers and boundary nodes. Version must be nonzero.
 struct GraphInterface final {
     std::uint32_t version{1};
     std::vector<GraphInterfacePin> pins;
@@ -133,12 +153,14 @@ struct GraphInterface final {
     bool operator==(const GraphInterface&) const = default;
 };
 
+/// Call a graph by ID in the same document; local dependencies must remain acyclic.
 struct DocumentGraphTarget final {
     GraphId graph;
 
     bool operator==(const DocumentGraphTarget&) const = default;
 };
 
+/// External call by stable asset key. Its expected interface is persisted even if the asset is missing.
 struct GraphAssetTarget final {
     GraphAssetId asset;
     GraphInterface interface;
@@ -148,6 +170,7 @@ struct GraphAssetTarget final {
 
 using SubgraphTarget = std::variant<DocumentGraphTarget, GraphAssetTarget>;
 
+/// Binding of a Subgraph node. Owned targets must be local; an external asset may only be referenced.
 struct SubgraphReference final {
     SubgraphOwnership ownership{SubgraphOwnership::Referenced};
     SubgraphTarget target{DocumentGraphTarget{}};
@@ -155,6 +178,8 @@ struct SubgraphReference final {
     bool operator==(const SubgraphReference&) const = default;
 };
 
+/// Pin with a document-wide ID, owning node and non-empty key unique on that node. Labels are for display;
+/// reconciliation uses the key rather than the label or ordinal.
 struct PinInstance final {
     PinId id;
     NodeId node;
@@ -170,6 +195,9 @@ struct PinInstance final {
     bool operator==(const PinInstance&) const = default;
 };
 
+/// Persisted authoring state, independent of a UI descriptor. pins is the ordered list of this node's
+/// pin IDs; type_version identifies the saved schema, not the document JSON format. Only Subgraph
+/// nodes have a subgraph binding. read_only is semantic protection, not a drawing preference.
 struct NodeInstance final {
     NodeId id;
     TypeId type;
@@ -184,6 +212,7 @@ struct NodeInstance final {
     bool operator==(const NodeInstance&) const = default;
 };
 
+/// A directed edge between two pins of one graph. The ordered endpoint pair must be unique.
 struct Link final {
     LinkId id;
     PinId output;
@@ -193,6 +222,7 @@ struct Link final {
     bool operator==(const Link&) const = default;
 };
 
+/// Identifies a proxy pin and its actual containing node and graph (not just a PinId).
 struct IntergraphEndpoint final {
     GraphId graph;
     NodeId node;
@@ -201,6 +231,9 @@ struct IntergraphEndpoint final {
     bool operator==(const IntergraphEndpoint&) const = default;
 };
 
+/// Directed dependency between different graphs: source is an IntergraphOutput node's **input**,
+/// destination an IntergraphInput node's **output**. Both pins must have identical type and kind,
+/// may participate in at most one intergraph link each, and must not introduce a dependency cycle.
 struct IntergraphLink final {
     IntergraphLinkId id;
     IntergraphEndpoint source;
@@ -210,6 +243,7 @@ struct IntergraphLink final {
     bool operator==(const IntergraphLink&) const = default;
 };
 
+/// Containing graph and node returned by the document's pin ownership index.
 struct PinOwner final {
     GraphId graph;
     NodeId node;
@@ -217,6 +251,7 @@ struct PinOwner final {
     bool operator==(const PinOwner&) const = default;
 };
 
+/// Reverse lookup record: graph and node of the caller, and how it holds the target.
 struct SubgraphCallSite final {
     GraphId graph;
     NodeId node;
@@ -225,6 +260,9 @@ struct SubgraphCallSite final {
     bool operator==(const SubgraphCallSite&) const = default;
 };
 
+/// Copy-on-write map of immutable entity records. Copies share unmodified storage; iteration order
+/// is unspecified. Iterators, key/value references and at() results borrow the current storage;
+/// do not keep them across mutation. Use SharedAt() to retain one value or copy the map for traversal.
 template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEntityMap final {
   private:
     struct Entry;
@@ -238,6 +276,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
     using value_type = std::pair<const Id, Value>;
     using size_type = std::size_t;
 
+    /// Read-only forward iterator. Dereferencing yields a proxy holding references, not an owning pair.
     class const_iterator final {
       public:
         struct reference final {
@@ -333,6 +372,9 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         }
     }
 
+    /// @name Size, membership and read-only iteration
+    /// begin/end delimit all entries, even on a non-const map; find returns end on a miss.
+    /// @{
     [[nodiscard]] bool empty() const noexcept {
         return !m_root || m_root->size == 0;
     }
@@ -377,6 +419,9 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return std::as_const(*this).find(id);
     }
 
+    /// @}
+
+    /// Borrow a mapped value. Throws std::out_of_range for a missing ID.
     [[nodiscard]] const Value& at(const Id id) const {
         const auto position = find(id);
         if (position == end()) {
@@ -389,6 +434,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return std::as_const(*this).at(id);
     }
 
+    /// Return an owning immutable handle, or null if absent. Survives replacement and erasure.
     [[nodiscard]] std::shared_ptr<const Value> SharedAt(const Id id) const {
         if (!m_root) return {};
         const size_type shard_index = ShardIndex(id);
@@ -400,6 +446,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return position != shard->entries.end() && position->id == id ? position->value : nullptr;
     }
 
+    /// Hint at expected size when empty; no effect on an already populated map.
     void reserve(const size_type count) {
         if (count == 0 || !empty()) {
             return;
@@ -408,6 +455,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         m_root->reserved_per_shard = (count + ShardCount - 1) / ShardCount;
     }
 
+    /// Insert only if absent; return the entry and whether it was inserted.
     template<typename Mapped> std::pair<const_iterator, bool> emplace(const Id id, Mapped&& value) {
         if (const auto existing = find(id); existing != end()) {
             return {existing, false};
@@ -422,6 +470,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
                 true};
     }
 
+    /// Publish a new value at id; the boolean is false on replacement, true on insertion.
     template<typename Mapped> std::pair<const_iterator, bool> insert_or_assign(const Id id, Mapped&& value) {
         const bool inserted = find(id) == end();
         std::shared_ptr<const Value> immutable_value = std::make_shared<Value>(std::forward<Mapped>(value));
@@ -441,6 +490,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
                 inserted};
     }
 
+    /// Erase by ID; return the number removed (zero or one).
     size_type erase(const Id id) {
         if (!contains(id)) {
             return 0;
@@ -452,6 +502,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return 1;
     }
 
+    /// Erase a valid iterator into this root and return its successor. end() or a different root returns end().
     const_iterator erase(const const_iterator position) {
         if (position.m_root != m_root.get() || position == end()) {
             return end();
@@ -464,6 +515,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return next_id ? find(*next_id) : end();
     }
 
+    /// Release this map's root, leaving independent copies intact.
     void clear() {
         m_root.reset();
     }
@@ -476,6 +528,8 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         return equal;
     }
 
+    /// Visit changed IDs as callback(id, before, after). A null side denotes absence. Values borrow
+    /// the compared maps; do not mutate them during traversal. Equal values are omitted.
     template<typename Callback> void ForEachDifference(const CowEntityMap& other, Callback&& callback) const {
         (void)ForEachDifferenceWhile(other, [&](const Id id, const Value* before, const Value* after) {
             callback(id, before, after);
@@ -483,6 +537,7 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
         });
     }
 
+    /// Like ForEachDifference(), but stop and return false on the first false callback; true on completion.
     template<typename Callback> bool ForEachDifferenceWhile(const CowEntityMap& other, Callback&& callback) const {
         if (m_root == other.m_root) return true;
         for (size_type shard_index = 0; shard_index < ShardCount; ++shard_index) {
@@ -657,6 +712,8 @@ template<typename Id, typename Value, Detail::CowCopyDomain Domain> class CowEnt
     friend class GraphDocument;
 };
 
+/// Persistent ordered key/value index. Iterators yield **values** in ascending key order and borrow
+/// the map. A copied map retains the old tree across updates; a borrowed reference/iterator does not.
 template<typename Key, typename Value = Key, Detail::CowCopyDomain Domain = Detail::CowCopyDomain::SemanticIndexes>
 class CowAdjacencyMap final {
   private:
@@ -748,6 +805,7 @@ class CowAdjacencyMap final {
         return std::as_const(*this).end();
     }
 
+    /// Borrow a value by exact key; null on miss.
     [[nodiscard]] const Value* Find(const Key& key) const noexcept {
         const Node* node = m_root.get();
         while (node != nullptr) {
@@ -757,6 +815,8 @@ class CowAdjacencyMap final {
         return nullptr;
     }
 
+    /// Heterogeneous lookup. compare(lookup, stored_key) must be consistent with key ordering,
+    /// return negative/zero/positive, and not throw. Result borrows the map or is null.
     template<typename Lookup, typename Compare>
     [[nodiscard]] const Value* FindEquivalent(const Lookup& key, Compare compare) const noexcept {
         const Node* node = m_root.get();
@@ -772,6 +832,8 @@ class CowAdjacencyMap final {
         return Find(key) != nullptr;
     }
 
+    /// Return true only for insertion (false for replacement or no change). Optional path_copies
+    /// receives the number of copied tree nodes, zero on no change.
     bool insert_or_assign(const Key key, Value value, std::uint64_t* path_copies = nullptr) {
         if (path_copies != nullptr) *path_copies = 0;
         const Value* current = Find(key);
@@ -785,6 +847,7 @@ class CowAdjacencyMap final {
         return inserted;
     }
 
+    /// Return zero or one erased entry, optionally reporting copied tree nodes in path_copies.
     size_type erase(const Key key, std::uint64_t* path_copies = nullptr) {
         if (path_copies != nullptr) *path_copies = 0;
         if (!contains(key)) return 0;
@@ -796,6 +859,7 @@ class CowAdjacencyMap final {
         return 1;
     }
 
+    /// Test root identity, not logical equality. Empty trees share the null root.
     [[nodiscard]] bool SharesStorageWith(const CowAdjacencyMap& other) const noexcept {
         return m_root == other.m_root;
     }
@@ -819,6 +883,7 @@ class CowAdjacencyMap final {
         return right.empty();
     }
 
+    /// Shared immutable empty range; no caller ownership is required.
     [[nodiscard]] static const CowAdjacencyMap& Empty() {
         static const CowAdjacencyMap empty;
         return empty;
@@ -954,6 +1019,8 @@ using SubgraphCallerRange = CowAdjacencyMap<NodeId, SubgraphCallSite>;
 using IntergraphLinkRange = CowAdjacencyMap<IntergraphLinkId>;
 using BoundaryNodeRange = CowAdjacencyMap<NodeId>;
 
+/// Change counters for the whole model or one graph. serial tracks semantic commits; topology,
+/// value and layout distinguish connectivity, value changes and geometry-affecting semantic edits.
 struct SemanticRevisionSet final {
     std::uint64_t serial{0};
     std::uint64_t topology{0};
@@ -963,6 +1030,8 @@ struct SemanticRevisionSet final {
     bool operator==(const SemanticRevisionSet&) const = default;
 };
 
+/// A single local graph, with semantic records only. Presentation, intergraph edges, revisions and
+/// reverse indexes live outside this record. Entity map keys must match the records' stored IDs.
 struct Graph final {
     GraphId id;
     std::string display_name;
@@ -982,18 +1051,23 @@ struct Graph final {
 using GraphMap = CowEntityMap<GraphId, Graph, Detail::CowCopyDomain::Graphs>;
 using GraphRevisionMap = CowEntityMap<GraphId, SemanticRevisionSet, Detail::CowCopyDomain::GraphRevisions>;
 
+/// Owning inverse data for a semantic node removal: the node, its pins and incident local links,
+/// not group membership, presentation or intergraph edges.
 struct RemovedNode final {
     NodeInstance node;
     std::vector<PinInstance> pins;
     std::vector<Link> links;
 };
 
+/// Dynamic pin, its original index in its node's pin list, and local links removed with it.
 struct RemovedPin final {
     PinInstance pin;
     std::size_t index{0};
     std::vector<Link> links;
 };
 
+/// Diagnostic counts of copy-on-write work within one domain. Logical bytes estimate data copied,
+/// not physical allocations or live memory consumption.
 struct CopyDomainMetrics final {
     std::uint64_t root_clones{0};
     std::uint64_t directory_clones{0};
@@ -1004,6 +1078,7 @@ struct CopyDomainMetrics final {
     std::uint64_t logical_bytes{0};
 };
 
+/// Cumulative library instrumentation for copies, journal/policy work, validations and index updates.
 struct TransactionMetrics final {
     CopyDomainMetrics graphs;
     CopyDomainMetrics graph_revisions;
@@ -1032,9 +1107,16 @@ struct TransactionMetrics final {
     std::uint64_t copied_logical_bytes{0};
 };
 
+/// Read cumulative counters across documents, not just the most recent transaction.
 [[nodiscard]] UNI_GUI_EXPORT TransactionMetrics GetTransactionMetrics() noexcept;
+/// Zero the diagnostic counters; no document or revision is reset.
 UNI_GUI_EXPORT void ResetTransactionMetrics() noexcept;
 
+/// Move-only owner of the live semantic model, initially with one reusable root (schema 1).
+/// Moving transfers that model's identity; the moved-from object receives a fresh document/root.
+/// Mutate via CommandStack on the UI thread. Pointers, references and reference_wrappers from
+/// queries borrow this generation: reacquire after mutation, move or swap. Use a snapshot for
+/// retained reads on a worker; do not race live document reads with editing.
 class UNI_GUI_EXPORT GraphDocument final {
   public:
     GraphDocument();
@@ -1043,41 +1125,73 @@ class UNI_GUI_EXPORT GraphDocument final {
     GraphDocument& operator=(GraphDocument&& other);
     GraphDocument(const GraphDocument&) = delete;
     GraphDocument& operator=(const GraphDocument&) = delete;
+    /// Exchange complete states, including logical identities and ID allocation state.
     void Swap(GraphDocument& other) noexcept;
 
+    /// Application data-schema version, independent of the JSON envelope version.
     [[nodiscard]] std::uint32_t SchemaVersion() const noexcept;
+    /// Entry graph in this document, never an owned child in a valid model.
     [[nodiscard]] GraphId RootGraph() const noexcept;
+    /// Advances once per committed semantic change, not per entity and not on ID reservation.
     [[nodiscard]] std::uint64_t ModelRevision() const noexcept;
+    /// Current document-wide revision domains.
     [[nodiscard]] SemanticRevisionSet SemanticRevisions() const noexcept;
+    /// Graph-specific counters, all zero when no revision entry exists.
     [[nodiscard]] SemanticRevisionSet GraphRevisions(GraphId graph) const noexcept;
+    /// Logical owner identity used to distinguish documents with identical revision numbers.
     [[nodiscard]] std::uint64_t Identity() const noexcept;
+    /// Tracks ID reservations independently of persisted changes; used to reject stale transactions.
     [[nodiscard]] std::uint64_t AllocationEpoch() const noexcept;
 
+    /// @name Reserve a document-wide ID of the requested kind
+    /// A successful reservation advances the allocation epoch without creating an entity. Zero
+    /// signals exhausted ID space or allocation epoch. Inside a command use the transaction instead.
+    /// @{
     [[nodiscard]] GraphId AllocateGraphId() noexcept;
     [[nodiscard]] NodeId AllocateNodeId() noexcept;
     [[nodiscard]] PinId AllocatePinId() noexcept;
     [[nodiscard]] LinkId AllocateLinkId() noexcept;
     [[nodiscard]] IntergraphLinkId AllocateIntergraphLinkId() noexcept;
 
+    /// @}
+
+    /// @name Borrow semantic records
+    /// Return null if absent (including an entity in a different graph). Intergraph links are
+    /// addressed document-wide; IntergraphLinks() returns the complete borrowed map.
+    /// @{
     [[nodiscard]] const Graph* FindGraph(GraphId id) const noexcept;
     [[nodiscard]] const NodeInstance* FindNode(GraphId graph, NodeId id) const noexcept;
     [[nodiscard]] const PinInstance* FindPin(GraphId graph, PinId id) const noexcept;
     [[nodiscard]] const Link* FindLink(GraphId graph, LinkId id) const noexcept;
     [[nodiscard]] const IntergraphLink* FindIntergraphLink(IntergraphLinkId id) const noexcept;
     [[nodiscard]] const IntergraphLinkMap& IntergraphLinks() const noexcept;
+    /// @}
+
+    /// @name Reverse indexes
+    /// Missing scalar IDs are zero, a missing PinOwner is nullopt, and missing indexed ranges
+    /// are empty. Range elements iterate in key order. Copy the range by value to keep its snapshot.
+    /// @{
     [[nodiscard]] GraphId FindNodeGraph(NodeId node) const noexcept;
     [[nodiscard]] std::optional<PinOwner> FindPinOwner(PinId pin) const noexcept;
     [[nodiscard]] GraphId FindLinkGraph(LinkId link) const noexcept;
+    /// Look up the ordered (output,input) pair; the arguments are not reordered.
     [[nodiscard]] LinkId FindLinkBetween(PinId output, PinId input) const noexcept;
     [[nodiscard]] const IncidentLinkRange& IncidentLinks(PinId pin) const noexcept;
     [[nodiscard]] const SubgraphCallerRange& SubgraphCallers(GraphId graph) const noexcept;
     [[nodiscard]] std::size_t OwnedSubgraphCallerCount(GraphId graph) const noexcept;
     [[nodiscard]] IntergraphLinkId IntergraphLinkForPin(PinId pin) const noexcept;
     [[nodiscard]] const IntergraphLinkRange& IntergraphLinksForGraph(GraphId graph) const noexcept;
+    /// Only BoundaryInput and BoundaryOutput select an index; other roles give an empty range.
     [[nodiscard]] const BoundaryNodeRange& BoundaryNodes(GraphId graph, NodeRole role) const noexcept;
+    /// @}
+    /// Follow local subgraph and intergraph dependencies. A zero ID is false; equal nonzero IDs
+    /// admit a zero-length path. This is not an existence check.
     [[nodiscard]] bool HasDependencyPath(GraphId from, GraphId target) const;
 
+    /// Owns the result vector, not its graphs. No ordering is guaranteed.
     [[nodiscard]] std::vector<std::reference_wrapper<const Graph>> Graphs() const;
+    /// Audit primary records and derived indexes, including IDs, hierarchy, interfaces and cycles.
+    /// Returns a structural error on failure. Does not consult type registrations or resolve external assets.
     [[nodiscard]] Result<void> ValidateStructure() const;
 
   private:
@@ -1087,7 +1201,8 @@ class UNI_GUI_EXPORT GraphDocument final {
     [[nodiscard]] Result<void> SetRootGraph(GraphId graph);
     [[nodiscard]] Result<GraphId> AddGraph(GraphId id = {});
     [[nodiscard]] Result<Graph> RemoveGraph(GraphId id);
-    [[nodiscard]] Result<void> RestoreGraph(Graph graph);
+    /// Install a staged graph with its pre-transaction revisions (zero for a new ID).
+    [[nodiscard]] Result<void> RestoreGraph(Graph graph, SemanticRevisionSet revisions);
     [[nodiscard]] Result<void> AddNode(GraphId graph, NodeInstance node, std::span<const PinInstance> pins);
     [[nodiscard]] Result<RemovedNode> RemoveNode(GraphId graph, NodeId node);
     [[nodiscard]] Result<void> RestoreNode(GraphId graph, RemovedNode removed);

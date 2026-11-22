@@ -120,12 +120,13 @@ Result<GraphId> GraphTransaction::AddGraph(Graph graph) {
     if (auto budget = m_impl->ConsumeOperations(operation_count); !budget) {
         return std::unexpected(std::move(budget.error()));
     }
-    if (auto result = m_impl->staged_document.RestoreGraph(std::move(graph)); !result) {
+    const auto revisions = m_impl->baseline_document.GraphRevisions(id);
+    if (auto result = m_impl->staged_document.RestoreGraph(std::move(graph), revisions); !result) {
         m_impl->ReleaseOperations(operation_count);
         return std::unexpected(std::move(result.error()));
     }
     m_impl->model_changed = true;
-    m_impl->TouchGraph(id, SemanticDomain::Topology | SemanticDomain::Layout);
+    m_impl->TouchAddedGraph(id);
     m_impl->RecordGraphAdded(*Document().FindGraph(id));
     return id;
 }
@@ -176,11 +177,12 @@ Result<void> GraphTransaction::RestoreGraph(Graph graph) {
     }
     const std::size_t operation_count = 1 + graph.nodes.size() + graph.pins.size() + graph.links.size();
     if (auto budget = m_impl->ConsumeOperations(operation_count); !budget) return budget;
-    auto result = m_impl->staged_document.RestoreGraph(std::move(graph));
+    const auto revisions = m_impl->baseline_document.GraphRevisions(graph_id);
+    auto result = m_impl->staged_document.RestoreGraph(std::move(graph), revisions);
     if (!result) m_impl->ReleaseOperations(operation_count);
     if (result) {
         m_impl->model_changed = true;
-        m_impl->TouchGraph(graph_id, SemanticDomain::Topology | SemanticDomain::Layout);
+        m_impl->TouchAddedGraph(graph_id);
         m_impl->RecordGraphAdded(*Document().FindGraph(graph_id));
     }
     return result;

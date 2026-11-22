@@ -75,7 +75,7 @@ namespace {
 } // namespace
 
 struct GraphAssetSubscription::State final {
-    std::map<std::uint64_t, GraphAssetChangeFn> callbacks;
+    std::map<std::uint64_t, std::shared_ptr<const GraphAssetChangeFn>> callbacks;
     std::uint64_t next_id{1};
 };
 
@@ -206,6 +206,9 @@ struct PreparedWrite final {
     const GraphAssetRegistry::Impl::State& state,
     const GraphAsset& asset,
     const GraphAssetWriteMode mode) {
+    if (mode != GraphAssetWriteMode::Insert && mode != GraphAssetWriteMode::Replace && mode != GraphAssetWriteMode::Upsert) {
+        return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Graph asset write mode is invalid"));
+    }
     if (asset.id.Empty()) {
         return std::unexpected(MakeError(ErrorCode::InvalidArgument, "Graph asset ID is required"));
     }
@@ -486,8 +489,8 @@ void ApplyDependencyDelta(
     }
 }
 
-[[nodiscard]] std::vector<GraphAssetChangeFn> SnapshotCallbacks(const GraphAssetRegistry::Impl& impl) {
-    std::vector<GraphAssetChangeFn> callbacks;
+[[nodiscard]] std::vector<std::shared_ptr<const GraphAssetChangeFn>> SnapshotCallbacks(const GraphAssetRegistry::Impl& impl) {
+    std::vector<std::shared_ptr<const GraphAssetChangeFn>> callbacks;
     callbacks.reserve(impl.subscriptions->callbacks.size());
     for (const auto& [id, callback] : impl.subscriptions->callbacks) {
         (void)id;
@@ -513,12 +516,12 @@ private:
 void Dispatch(
     std::shared_ptr<GraphAssetRegistry::Impl> impl,
     const std::vector<GraphAssetChange>& events,
-    const std::vector<GraphAssetChangeFn>& callbacks) noexcept {
+    const std::vector<std::shared_ptr<const GraphAssetChangeFn>>& callbacks) noexcept {
     DispatchGuard guard{std::move(impl)};
     for (const auto& event : events) {
         for (const auto& callback : callbacks) {
             try {
-                callback(event);
+                (*callback)(event);
             } catch (...) {
             }
         }
@@ -751,7 +754,7 @@ GraphAssetSubscription GraphAssetRegistry::Subscribe(GraphAssetChangeFn callback
     auto& state = *impl->subscriptions;
     while (state.next_id == 0 || state.callbacks.contains(state.next_id)) ++state.next_id;
     const auto id = state.next_id++;
-    state.callbacks.emplace(id, std::move(callback));
+    state.callbacks.emplace(id, std::make_shared<const GraphAssetChangeFn>(std::move(callback)));
     return GraphAssetSubscription{impl->subscriptions, id};
 }
 

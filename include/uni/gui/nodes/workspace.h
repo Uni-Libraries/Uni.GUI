@@ -1,5 +1,8 @@
 #pragma once
 
+/// @file
+/// @brief UI-thread facade tying a document, presentation, command history and registries to one editor.
+
 #include <uni/gui/nodes/editor.h>
 #include <uni/gui/nodes/io.h>
 #include <uni/gui/nodes/snapshot.h>
@@ -11,6 +14,10 @@
 
 namespace Uni::GUI::Nodes {
 
+/// Stable, nonmovable workspace. Command methods always use this document/presentation and its
+/// single semantic catalog; their results, conflicts and deferrals follow CommandStack. During
+/// a guarded load, command and registration methods return CommandFailed. Const references into
+/// live owners are not snapshots; use CaptureSnapshot() before handing model data to a worker.
 class NodeEditorWorkspace final {
 public:
     NodeEditorWorkspace() = default;
@@ -20,6 +27,8 @@ public:
     NodeEditorWorkspace(NodeEditorWorkspace&&) = delete;
     NodeEditorWorkspace& operator=(NodeEditorWorkspace&&) = delete;
 
+    /// Consume a non-null command. Success may be a no-op or pending authorization; inspect
+    /// CommandResult::deferred before treating an edit as committed.
     [[nodiscard]] Result<CommandResult> Execute(
         std::unique_ptr<Command> command,
         const GraphPolicy& policy = {}) {
@@ -27,11 +36,14 @@ public:
         return commands.Execute(std::move(command), document, presentation, m_registry, policy);
     }
 
+    /// Restore recorded history, bypassing current policy/protection; NothingToUndo if empty.
     [[nodiscard]] Result<CommandResult> Undo() {
         if (m_loading) return LoadingError<CommandResult>();
         return commands.Undo(document, presentation, m_registry);
     }
 
+    /// By default authorize the inverse batch with policy, unlike the parameterless overload.
+    /// Pass RestoreHistory to bypass authorization. Denial/deferral do not consume the undo entry.
     [[nodiscard]] Result<CommandResult> Undo(
         const GraphPolicy& policy,
         const UndoPolicyMode mode = UndoPolicyMode::RespectCurrentPolicy) {
@@ -39,11 +51,14 @@ public:
         return commands.Undo(document, presentation, policy, mode, m_registry);
     }
 
+    /// Reapply the last undone command with current protection and policy; NothingToRedo if empty.
     [[nodiscard]] Result<CommandResult> Redo(const GraphPolicy& policy = {}) {
         if (m_loading) return LoadingError<CommandResult>();
         return commands.Redo(document, presentation, m_registry, policy);
     }
 
+    /// Approve or reauthorize the identified prepared edit. Both modes recheck freshness; a
+    /// changed owner, allocation epoch or recorded catalog dependency may require cancellation.
     [[nodiscard]] Result<CommandResult> Resume(
         const DeferredOperationId operation,
         const ResumeMode mode,
@@ -52,15 +67,20 @@ public:
         return commands.Resume(operation, document, presentation, mode, policy);
     }
 
+    /// Drop a retained batch without publishing it; a nonmatching ID gives DeferredOperationNotFound.
     [[nodiscard]] Result<void> Cancel(const DeferredOperationId operation) {
         if (m_loading) return LoadingError<void>();
         return commands.Cancel(operation);
     }
 
+    /// True while this workspace has a staged command awaiting authorization.
     [[nodiscard]] bool HasPending() const noexcept { return commands.HasPending(); }
 
+    /// Borrow the workspace catalog. RegistryCatalog::Snapshot() retains an immutable generation.
     [[nodiscard]] const RegistryCatalog& Registry() const noexcept { return m_registry; }
 
+    /// Begin a move-only registry batch (no publication until Commit()). Starting an update during
+    /// load or stack execution fails; merely waiting for deferred approval is not a registry lock.
     [[nodiscard]] Result<RegistryUpdate> BeginUpdate() {
         if (m_loading) return LoadingError<RegistryUpdate>();
         if (commands.IsBusy()) {
@@ -71,6 +91,12 @@ public:
         return m_registry.BeginUpdate();
     }
 
+    /// @name Runtime node descriptors and type compatibility
+    /// Delegate to RegistryCatalog with a busy/load guard. Registration rejects duplicates;
+    /// replacement requires an existing type. Unregister returns false on miss, TypeInUse for
+    /// remaining converter registrations; it does not delete instances. An empty compatibility
+    /// callback/clear removes the extension, leaving built-in compatibility and conversion lookup.
+    /// @{
     [[nodiscard]] Result<void> RegisterNodeType(NodeTypeDescriptor descriptor) {
         if (m_loading) return LoadingError<void>();
         if (commands.IsBusy()) return BusyRegistryError<void>();
@@ -106,6 +132,10 @@ public:
         return m_registry.ClearTypeCompatibility();
     }
 
+    /// @}
+
+    /// Reserve IDs from document and prepare (do not insert) an instance using defaults and options.
+    /// Unknown type, exhausted IDs or schema resolution errors propagate. Use AddNodeCommand to insert.
     [[nodiscard]] Result<NodeCreation> InstantiateNode(
         const TypeId& type,
         NodeInstantiationOptions options = {}) {
@@ -113,6 +143,11 @@ public:
         return m_registry.Instantiate(document, type, std::move(options));
     }
 
+    /// @name Converter registrations
+    /// Register a unique directed conversion key and receive a catalog-bound token. Replace keeps
+    /// its token; unregister returns false for an already removed local token. Foreign/empty tokens
+    /// are errors. These runtime changes are blocked while loading or executing, and not serialized.
+    /// @{
     [[nodiscard]] Result<ConversionRegistrationToken> RegisterConversion(ConversionDescriptor descriptor) {
         if (m_loading) return LoadingError<ConversionRegistrationToken>();
         if (commands.IsBusy()) return BusyRegistryError<ConversionRegistrationToken>();
@@ -133,20 +168,31 @@ public:
         return m_registry.ReplaceConversion(registration, std::move(descriptor));
     }
 
+    /// @}
+
+    /// Borrow the pending description, or null. Copy to retain beyond resume, cancel or workspace destruction.
     [[nodiscard]] const DeferredOperation* PendingOperation() const noexcept {
         return commands.PendingOperation();
     }
 
+    /// Capture committed semantic state on the UI thread; worker reads remain valid across load/edits.
     [[nodiscard]] GraphDocumentSnapshot CaptureSnapshot() const {
         return CaptureGraphDocumentSnapshot(document);
     }
 
+    /// Save only committed document and presentation, even while an operation is pending. Does not
+    /// persist history, registrations or editor navigation. See SaveGraphDocumentJson() for file errors.
     [[nodiscard]] Result<void> Save(
         const std::string_view path,
         const GraphIoLimits& limits = {}) const {
         return SaveGraphDocumentJson(path, document, presentation, limits);
     }
 
+    /// Load into fresh temporary owners, optionally migrate, and return nonfatal warnings. A null
+    /// migrations pointer accepts only application schema one. OperationPending blocks a pending
+    /// workspace; a busy stack or recursive load gives CommandFailed. Owner/revision/allocation
+    /// changes in callbacks cause RevisionConflict. Only on success swap in the new owners, reset
+    /// transient editor state and clear history. Existing runtime registrations are kept.
     [[nodiscard]] Result<std::vector<GraphIoWarning>> Load(
         const std::string_view path,
         const DocumentMigrationRegistry* migrations = nullptr,
@@ -207,6 +253,9 @@ public:
         return warnings;
     }
 
+    /// DrawEditor() using this workspace's owners. Call inside an active ImGui frame/window on the
+    /// UI thread, not recursively. Zero size components use available space. Style, config, callbacks
+    /// and policy are borrowed for this call; inspect the returned frame result and editor.LastError().
     [[nodiscard]] EditorResult Draw(
         const Vec2 size = {},
         const EditorStyle& style = {},
@@ -228,12 +277,12 @@ public:
             policy);
     }
 
-    GraphDocument document;
-    GraphPresentation presentation;
-    NodeUiRegistry node_ui;
-    LinkRouterRegistry routers;
-    CommandStack commands;
-    EditorContext editor;
+    GraphDocument document;          ///< Committed semantic state, not the pending transaction.
+    GraphPresentation presentation;  ///< Persisted canvas records matching document IDs.
+    NodeUiRegistry node_ui;          ///< Runtime draw/layout registrations, independent of semantic types.
+    LinkRouterRegistry routers;      ///< Runtime implementations selected by persisted router IDs.
+    CommandStack commands;           ///< Workspace history and pending authorization.
+    EditorContext editor;            ///< Transient selection, navigation, interaction and caches.
 
 private:
     RegistryCatalog m_registry;
